@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Animated,
   Platform,
+  Alert,
 } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
 import { useTrackingStore } from '../store/trackingStore';
@@ -20,7 +21,7 @@ export default function MapScreen() {
   const cameraRef = useRef<MapboxGL.Camera>(null);
   const [selectedPlace, setSelectedPlace] = useState<Segment | null>(null);
 
-  const { isTracking, currentPosition, todayLog } = useTrackingStore();
+  const { isTracking, currentPosition, todayLog, selectedDate } = useTrackingStore();
 
   const trips = useMemo(() => {
     if (!todayLog) return [];
@@ -50,10 +51,15 @@ export default function MapScreen() {
   }, [todayLog]);
 
   const handleToggleTracking = useCallback(async () => {
-    if (isTracking) {
-      await trackingService.stop();
-    } else {
-      await trackingService.start();
+    try {
+      if (isTracking) {
+        await trackingService.stop();
+      } else {
+        await trackingService.start();
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      Alert.alert('Tracking Error', msg);
     }
   }, [isTracking]);
 

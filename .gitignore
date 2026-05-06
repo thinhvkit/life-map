@@ -76,3 +76,5 @@ src/config.local.ts
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+.expo

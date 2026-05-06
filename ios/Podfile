@@ -5,6 +5,8 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
@@ -15,6 +17,7 @@ if linkage != nil
 end
 
 target 'LifeMap' do
+  use_expo_modules!
   config = use_native_modules!
 
   use_react_native!(
@@ -30,5 +33,18 @@ target 'LifeMap' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    ndebug_pods = %w[
+      RNScreens RNSVG rnmapbox-maps ReactCodegen
+      react-native-safe-area-context ReactAppDependencyProvider
+      ExpoModulesCore
+    ]
+    installer.pods_project.targets.each do |target|
+      next unless ndebug_pods.include?(target.name)
+      target.build_configurations.each do |config|
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'NDEBUG=1'
+      end
+    end
   end
 end

@@ -1,8 +1,6 @@
-import BackgroundGeolocation, {
-  Location,
-  MotionChangeEvent,
-  MotionActivityEvent,
-} from 'react-native-background-geolocation';
+import { Platform, PermissionsAndroid, Alert, Linking } from 'react-native';
+import * as Location from 'expo-location';
+import * as Battery from 'expo-battery';
 import {
   GpsPoint,
   Segment,
@@ -12,17 +10,27 @@ import {
 } from '../models/types';
 import { useTrackingStore } from '../store/trackingStore';
 import { placeDetectionService } from './placeDetection';
-import { classifyActivity } from './activityClassifier';
+import { classifyFromSensors, classifyBySpeed } from './activityClassifier';
 import { generateId, haversineDistance } from '../utils/geo';
-import { powerManager } from './powerManager';
+import { powerManager, ExpoLocationConfig } from './powerManager';
 import { placeGeofenceManager } from './placeGeofenceManager';
 import { motionDetector } from './motionDetector';
+import {
+  BACKGROUND_LOCATION_TASK,
+  registerLocationHandler,
+  registerGeofenceHandler,
+} from './backgroundTasks';
 
 class TrackingService {
   private isConfigured = false;
   private currentPoints: GpsPoint[] = [];
   private segmentStartTime: number = Date.now();
   private isMoving: boolean = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private batteryLevel = 1;
+  private isCharging = false;
+  private batteryLevelSub: Battery.Subscription | null = null;
+  private batteryStateSub: Battery.Subscription | null = null;
 
   async configure(
     _settings: AppSettings = DEFAULT_SETTINGS,
@@ -32,94 +40,51 @@ class TrackingService {
     await placeGeofenceManager.init();
     await placeDetectionService.init();
 
-    await BackgroundGeolocation.ready({
-      geolocation: {
-        desiredAccuracy: 10, // Start balanced
-        distanceFilter: 25,
-        stopTimeout: 5,
-        stationaryRadius: 25,
-        locationAuthorizationRequest: 'Always',
-      },
-      logger: {
-        debug: __DEV__,
-        logLevel: __DEV__ ? 5 : 0, // Verbose : Off
-      },
-      app: {
-        stopOnTerminate: false,
-        startOnBoot: true,
-        enableHeadless: true,
-        preventSuspend: false,
-        heartbeatInterval: 60,
-        backgroundPermissionRationale: {
-          title: 'Allow location access in background?',
-          message:
-            'Life Map needs background location to automatically track your daily movements and visited places.',
-          positiveAction: 'Allow',
-          negativeAction: 'Cancel',
-        },
-      },
-      activity: {
-        activityRecognitionInterval: 10000,
-        minimumActivityRecognitionConfidence: 70,
-      },
+    const { status: fgStatus } =
+      await Location.requestForegroundPermissionsAsync();
+    if (fgStatus !== 'granted') {
+      throw { code: 0, message: 'Foreground location permission denied' };
+    }
+
+    const { status: bgStatus } =
+      await Location.requestBackgroundPermissionsAsync();
+    if (bgStatus !== 'granted') {
+      Alert.alert(
+        'Background Location Required',
+        'Please enable "Always" location access for Life Map in Settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      );
+      throw { code: 0, message: 'Background location permission denied' };
+    }
+
+    registerLocationHandler((locations) => {
+      for (const loc of locations) {
+        this.onLocation(loc);
+      }
     });
 
-    this.registerEventListeners();
-    this.isConfigured = true;
-  }
-
-  async start(): Promise<void> {
-    if (!this.isConfigured) await this.configure();
-    await BackgroundGeolocation.start();
-    useTrackingStore.getState().setTracking(true);
-  }
-
-  async stop(): Promise<void> {
-    await this.finalizeCurrentSegment();
-    await BackgroundGeolocation.stop();
-    motionDetector.reset();
-    useTrackingStore.getState().setTracking(false);
-  }
-
-  async getCurrentPosition(): Promise<GpsPoint> {
-    const location = await BackgroundGeolocation.getCurrentPosition({
-      samples: 3,
-      persist: true,
-      timeout: 30,
-      maximumAge: 5000,
-      desiredAccuracy: 10,
+    registerGeofenceHandler((eventType, region) => {
+      placeGeofenceManager.handleGeofenceEvent(eventType, region);
     });
-    return this.locationToGpsPoint(location);
-  }
 
-  private registerEventListeners(): void {
-    BackgroundGeolocation.onLocation(
-      location => this.onLocation(location),
-      error => console.warn('[Tracking] Location error:', error),
+    if (Platform.OS === 'android' && Platform.Version >= 29) {
+      await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+      );
+    }
+
+    this.setupBatteryMonitoring();
+
+    await motionDetector.start(
+      (moving) => this.onMotionChange(moving),
+      (activity, confidence) => this.onNativeActivityChange(activity, confidence),
     );
 
-    BackgroundGeolocation.onMotionChange(event =>
-      this.onMotionChange(event),
-    );
-
-    BackgroundGeolocation.onActivityChange(event =>
-      this.onActivityChange(event),
-    );
-
-    BackgroundGeolocation.onProviderChange(event => {
-      console.log('[Tracking] Provider change:', event);
-    });
-
-    BackgroundGeolocation.onHeartbeat(() => {
-      powerManager.onHeartbeat();
-    });
-
-    BackgroundGeolocation.onGeofence(event => {
-      placeGeofenceManager.handleGeofenceEvent(event);
-    });
-
-    BackgroundGeolocation.onPowerSaveChange(enabled => {
-      powerManager.onPowerSaveChange(enabled);
+    powerManager.registerConfigChangeCallback(async (config) => {
+      await this.restartLocationUpdates(config);
     });
 
     placeGeofenceManager.onGeofenceEnter((placeId: string) => {
@@ -130,40 +95,151 @@ class TrackingService {
     placeGeofenceManager.onGeofenceExit(() => {
       powerManager.onGeofenceExit();
     });
+
+    this.isConfigured = true;
   }
 
-  private onLocation(location: Location): void {
-    const point = this.locationToGpsPoint(location);
-    useTrackingStore.getState().updatePosition(point);
-    this.currentPoints.push(point);
+  async start(): Promise<void> {
+    if (!this.isConfigured) await this.configure();
 
-    if (location.battery) {
-      powerManager.onLocation({
-        level: location.battery.level,
-        is_charging: location.battery.is_charging,
-      });
+    const config = powerManager.getCurrentLocationConfig();
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: config.accuracy,
+      distanceInterval: config.distanceInterval,
+      deferredUpdatesInterval: config.deferredUpdatesInterval,
+      activityType: Location.ActivityType.OtherNavigation,
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: 'Life Map',
+        notificationBody: 'Tracking your location',
+      },
+    });
+
+    this.startHeartbeat();
+    useTrackingStore.getState().setTracking(true);
+  }
+
+  async stop(): Promise<void> {
+    await this.finalizeCurrentSegment();
+
+    const isRunning = await Location.hasStartedLocationUpdatesAsync(
+      BACKGROUND_LOCATION_TASK,
+    );
+    if (isRunning) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
     }
+
+    this.stopHeartbeat();
+    motionDetector.stop();
+    motionDetector.reset();
+
+    this.batteryLevelSub?.remove();
+    this.batteryStateSub?.remove();
+    this.batteryLevelSub = null;
+    this.batteryStateSub = null;
+
+    useTrackingStore.getState().setTracking(false);
   }
 
-  private onMotionChange(event: MotionChangeEvent): void {
-    powerManager.onMotionChange(event.isMoving);
+  async getCurrentPosition(): Promise<GpsPoint> {
+    const location = await Location.getCurrentPositionAsync({
+      accuracy: Location.LocationAccuracy.High,
+    });
+    return this.locationToGpsPoint(location);
+  }
+
+  async restartLocationUpdates(config: ExpoLocationConfig): Promise<void> {
+    let isRunning = false;
+    try {
+      isRunning = await Location.hasStartedLocationUpdatesAsync(
+        BACKGROUND_LOCATION_TASK,
+      );
+    } catch {
+      return;
+    }
+    if (!isRunning) return;
+
+    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: config.accuracy,
+      distanceInterval: config.distanceInterval,
+      deferredUpdatesInterval: config.deferredUpdatesInterval,
+      activityType: Location.ActivityType.OtherNavigation,
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: 'Life Map',
+        notificationBody: 'Tracking your location',
+      },
+    });
+
+    this.restartHeartbeat();
+    console.log(`[Tracking] Restarted with accuracy=${config.accuracy}, dist=${config.distanceInterval}m`);
+  }
+
+  private setupBatteryMonitoring(): void {
+    Battery.getBatteryLevelAsync().then(level => {
+      this.batteryLevel = level;
+    });
+    Battery.getBatteryStateAsync().then(state => {
+      this.isCharging =
+        state === Battery.BatteryState.CHARGING ||
+        state === Battery.BatteryState.FULL;
+    });
+
+    this.batteryLevelSub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      this.batteryLevel = batteryLevel;
+      powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
+    });
+
+    this.batteryStateSub = Battery.addBatteryStateListener(({ batteryState }) => {
+      this.isCharging =
+        batteryState === Battery.BatteryState.CHARGING ||
+        batteryState === Battery.BatteryState.FULL;
+      powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
+    });
+  }
+
+  private onLocation(location: Location.LocationObject): void {
+    const point = this.locationToGpsPoint(location);
+
+    if (motionDetector.isUsingNative()) {
+      const { activity, confidence } = motionDetector.getLastActivity();
+      point.activity = activity;
+      point.confidence = confidence;
+    } else {
+      const speed = location.coords.speed ?? 0;
+      const accelVariance = motionDetector.getAccelVariance();
+      const { activity, confidence } = classifyFromSensors(speed, accelVariance);
+      point.activity = activity;
+      point.confidence = confidence;
+      powerManager.onActivityChange(activity, confidence);
+    }
+
+    useTrackingStore.getState().updatePosition(point);
+    useTrackingStore.getState().updateCurrentActivity(point.activity);
+    this.currentPoints.push(point);
+  }
+
+  private onNativeActivityChange(activity: ActivityType, confidence: number): void {
+    useTrackingStore.getState().updateCurrentActivity(activity);
+    powerManager.onActivityChange(activity, confidence);
+  }
+
+  private onMotionChange(isMoving: boolean): void {
+    powerManager.onMotionChange(isMoving);
 
     const wasMoving = this.isMoving;
-    this.isMoving = event.isMoving;
+    this.isMoving = isMoving;
 
-    if (wasMoving !== event.isMoving) {
+    if (wasMoving !== isMoving) {
       this.finalizeCurrentSegment();
-      this.startNewSegment(event.isMoving);
+      this.startNewSegment();
     }
   }
 
-  private onActivityChange(event: MotionActivityEvent): void {
-    const activity = classifyActivity(event.activity, event.confidence);
-    useTrackingStore.getState().updateCurrentActivity(activity);
-    powerManager.onActivityChange(activity, event.confidence);
-  }
-
-  private startNewSegment(_isMoving: boolean): void {
+  private startNewSegment(): void {
     this.currentPoints = [];
     this.segmentStartTime = Date.now();
   }
@@ -202,18 +278,18 @@ class TrackingService {
     useTrackingStore.getState().addSegment(segment);
   }
 
-  private locationToGpsPoint(location: Location): GpsPoint {
+  private locationToGpsPoint(location: Location.LocationObject): GpsPoint {
     return {
       id: generateId(),
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
-      altitude: location.coords.altitude || 0,
-      accuracy: location.coords.accuracy,
-      speed: location.coords.speed || 0,
-      heading: location.coords.heading || 0,
-      timestamp: new Date(location.timestamp).getTime(),
-      batteryLevel: location.battery?.level,
-      isMoving: location.is_moving,
+      altitude: location.coords.altitude ?? 0,
+      accuracy: location.coords.accuracy ?? 0,
+      speed: location.coords.speed ?? 0,
+      heading: location.coords.heading ?? 0,
+      timestamp: location.timestamp,
+      batteryLevel: this.batteryLevel,
+      isMoving: motionDetector.getIsMoving(),
       activity: 'unknown',
       confidence: 0,
     };
@@ -242,6 +318,25 @@ class TrackingService {
       );
     }
     return total;
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const interval = powerManager.getProfileConfig().heartbeatInterval * 1000;
+    this.heartbeatTimer = setInterval(() => {
+      powerManager.onHeartbeat();
+    }, interval);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private restartHeartbeat(): void {
+    this.startHeartbeat();
   }
 }
 

@@ -1,5 +1,8 @@
 PODS:
-  - AsyncStorage (3.0.2):
+  - EXConstants (55.0.15):
+    - ExpoModulesCore
+  - Expo (55.0.20):
+    - ExpoModulesCore
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -12,6 +15,48 @@ PODS:
     - React-ImageManager
     - React-jsi
     - React-NativeModulesApple
+    - React-RCTAppDelegate
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactAppDependencyProvider
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - ExpoAsset (55.0.16):
+    - ExpoModulesCore
+  - ExpoBattery (55.0.13):
+    - ExpoModulesCore
+  - ExpoDomWebView (55.0.5):
+    - ExpoModulesCore
+  - ExpoFileSystem (55.0.17):
+    - ExpoModulesCore
+  - ExpoFont (55.0.6):
+    - ExpoModulesCore
+  - ExpoKeepAwake (55.0.7):
+    - ExpoModulesCore
+  - ExpoLocation (55.1.8):
+    - ExpoModulesCore
+  - ExpoLogBox (55.0.11):
+    - React-Core
+  - ExpoModulesCore (55.0.24):
+    - ExpoModulesJSI
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-jsinspector
+    - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
     - React-rendererdebug
@@ -21,6 +66,16 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - ExpoModulesJSI (55.0.24):
+    - hermes-engine
+    - React-Core
+    - React-runtimescheduler
+    - ReactCommon
+  - ExpoSensors (55.0.13):
+    - ExpoModulesCore
+  - ExpoTaskManager (55.0.15):
+    - ExpoModulesCore
+    - UMAppLoader
   - FBLazyVector (0.85.2)
   - hermes-engine (250829098.0.10):
     - hermes-engine/Pre-built (= 250829098.0.10)
@@ -1868,29 +1923,6 @@ PODS:
     - React-utils (= 0.85.2)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.85.2)
-  - RNBackgroundGeolocation (5.1.1):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - TSLocationManager (~> 4.1.0)
-    - Yoga
   - rnmapbox-maps (10.3.0):
     - MapboxMaps (~> 11.18.2)
     - React
@@ -2010,14 +2042,25 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - TSBackgroundFetch (4.1.1)
-  - TSLocationManager (4.1.7):
-    - TSBackgroundFetch (~> 4.1.0)
   - Turf (4.0.0)
+  - UMAppLoader (55.0.5)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
-  - "AsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - EXConstants (from `../node_modules/expo/node_modules/expo-constants/ios`)
+  - Expo (from `../node_modules/expo`)
+  - ExpoAsset (from `../node_modules/expo/node_modules/expo-asset/ios`)
+  - ExpoBattery (from `../node_modules/expo-battery/ios`)
+  - "ExpoDomWebView (from `../node_modules/expo/node_modules/@expo/log-box/node_modules/@expo/dom-webview/ios`)"
+  - ExpoFileSystem (from `../node_modules/expo/node_modules/expo-file-system/ios`)
+  - ExpoFont (from `../node_modules/expo/node_modules/expo-font/ios`)
+  - ExpoKeepAwake (from `../node_modules/expo/node_modules/expo-keep-awake/ios`)
+  - ExpoLocation (from `../node_modules/expo-location/ios`)
+  - "ExpoLogBox (from `../node_modules/expo/node_modules/@expo/log-box`)"
+  - ExpoModulesCore (from `../node_modules/expo-modules-core`)
+  - ExpoModulesJSI (from `../node_modules/expo-modules-core`)
+  - ExpoSensors (from `../node_modules/expo-sensors/ios`)
+  - ExpoTaskManager (from `../node_modules/expo-task-manager/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - "op-sqlite (from `../node_modules/@op-engineering/op-sqlite`)"
@@ -2093,10 +2136,10 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios/ReactCodegen`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
-  - RNBackgroundGeolocation (from `../node_modules/react-native-background-geolocation`)
   - "rnmapbox-maps (from `../node_modules/@rnmapbox/maps`)"
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNSVG (from `../node_modules/react-native-svg`)
+  - UMAppLoader (from `../node_modules/unimodules-app-loader/ios`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
@@ -2104,13 +2147,37 @@ SPEC REPOS:
     - MapboxCommon
     - MapboxCoreMaps
     - MapboxMaps
-    - TSBackgroundFetch
-    - TSLocationManager
     - Turf
 
 EXTERNAL SOURCES:
-  AsyncStorage:
-    :path: "../node_modules/@react-native-async-storage/async-storage"
+  EXConstants:
+    :path: "../node_modules/expo/node_modules/expo-constants/ios"
+  Expo:
+    :path: "../node_modules/expo"
+  ExpoAsset:
+    :path: "../node_modules/expo/node_modules/expo-asset/ios"
+  ExpoBattery:
+    :path: "../node_modules/expo-battery/ios"
+  ExpoDomWebView:
+    :path: "../node_modules/expo/node_modules/@expo/log-box/node_modules/@expo/dom-webview/ios"
+  ExpoFileSystem:
+    :path: "../node_modules/expo/node_modules/expo-file-system/ios"
+  ExpoFont:
+    :path: "../node_modules/expo/node_modules/expo-font/ios"
+  ExpoKeepAwake:
+    :path: "../node_modules/expo/node_modules/expo-keep-awake/ios"
+  ExpoLocation:
+    :path: "../node_modules/expo-location/ios"
+  ExpoLogBox:
+    :path: "../node_modules/expo/node_modules/@expo/log-box"
+  ExpoModulesCore:
+    :path: "../node_modules/expo-modules-core"
+  ExpoModulesJSI:
+    :path: "../node_modules/expo-modules-core"
+  ExpoSensors:
+    :path: "../node_modules/expo-sensors/ios"
+  ExpoTaskManager:
+    :path: "../node_modules/expo-task-manager/ios"
   FBLazyVector:
     :path: "../node_modules/react-native/Libraries/FBLazyVector"
   hermes-engine:
@@ -2260,19 +2327,32 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   ReactNativeDependencies:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
-  RNBackgroundGeolocation:
-    :path: "../node_modules/react-native-background-geolocation"
   rnmapbox-maps:
     :path: "../node_modules/@rnmapbox/maps"
   RNScreens:
     :path: "../node_modules/react-native-screens"
   RNSVG:
     :path: "../node_modules/react-native-svg"
+  UMAppLoader:
+    :path: "../node_modules/unimodules-app-loader/ios"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
-  AsyncStorage: 857a13f3c66a30d6b02efa09babba3d457e8e8ca
+  EXConstants: 5caf448ff399f60be9d1053e77aed32e39411900
+  Expo: b5e229b249d150aff9f9a5fc1de31bb37aea7a05
+  ExpoAsset: f56ed740b6a127da2bfd90832cf688ae309d4410
+  ExpoBattery: 2b5ba5940ec9e0b723fb83346109175473a9e1c4
+  ExpoDomWebView: 2b2fbd9a07de8790569257cbf9dfdaa31cf95c70
+  ExpoFileSystem: a0e4a5a09c9c4f84338289b273a172609452dec9
+  ExpoFont: cdd7a1d574a376fa003c713eff49e0a4df8672c7
+  ExpoKeepAwake: 861c66deb0f9f28f87882610195f26c4b88fba6f
+  ExpoLocation: ba5fff1510a7f123abf620fc2242db2fc87eba0f
+  ExpoLogBox: 617da77cbc083627692b2ea050a3666808aef2cd
+  ExpoModulesCore: 3e6e556297762cea7c818783bb1fc8edde46bc59
+  ExpoModulesJSI: 9b60671a31c30bc8e24b25632e7cb475a84b9016
+  ExpoSensors: 8a6cb82a28ed592cc6923021b39aa4078dea3a53
+  ExpoTaskManager: 7c2660c3c0bd0ed863e1536e59e11b71ac1490c6
   FBLazyVector: 26fd21c75314e101f280d401e97f27d54f3f7064
   hermes-engine: 8903b9db58e216c7b3f7098d973d1a4456a74ad4
   MapboxCommon: 371fd6db596531464b6fd751ae7daa382fe2da2b
@@ -2347,18 +2427,16 @@ SPEC CHECKSUMS:
   React-utils: 862e61256698fe3841aec1af476abf924a6737c3
   React-webperformancenativemodule: e745e43264767cb8f4334fc11bf3fbff880050d0
   ReactAppDependencyProvider: 22e2265d86a4e871e5e858f4e7ef1c8d01103680
-  ReactCodegen: 5bd23df5c8ad6c87df0bc8ccd391bd37bf6c92d5
+  ReactCodegen: 7a887e7bd5dec0b2eb6826d3b5bfee18d4b3d0ee
   ReactCommon: a804bb8d1dcf3ecdec3a77eb8bba19b7863bbbdb
   ReactNativeDependencies: d30d5ad908522029ac32f89f86463a430c2eb989
-  RNBackgroundGeolocation: a02a605150503eb37a4eed1297ffb9559fae199a
   rnmapbox-maps: 606ed24414ce13519dda3f3c898040d76bb0abcf
   RNScreens: 01b065ded2dfe7987bcce770ff3a196be417ff41
   RNSVG: 04044c3abcf177fd674a1a3d13097efa1adebcbe
-  TSBackgroundFetch: 18918b6449a1e3f01eb0f5b44d6d79ce6160a5a5
-  TSLocationManager: 0c1b8ed109ae05ea4247def2992b3e4e3f49f839
   Turf: c9eb11a65d96af58cac523460fd40fec5061b081
+  UMAppLoader: 045699ef1cc6afda399a5c78bde728f23bcce213
   Yoga: 04bb4bfeb02c0000b940c1e6e89e856cd8de5a71
 
-PODFILE CHECKSUM: d4e0fbcc1763fd02759f50b05f602f54d6130ab9
+PODFILE CHECKSUM: c9d70809e3b857c3d39c2a3341a66bd87c95166a
 
 COCOAPODS: 1.16.2

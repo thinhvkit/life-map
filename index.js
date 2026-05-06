@@ -2,6 +2,7 @@
  * @format
  */
 
+import './src/services/backgroundTasks';
 import MapboxGL from '@rnmapbox/maps';
 import { AppRegistry } from 'react-native';
 import App from './App';

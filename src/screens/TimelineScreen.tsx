@@ -11,24 +11,12 @@ import { format, subDays, addDays, isToday, parseISO } from 'date-fns';
 import { useTrackingStore } from '../store/trackingStore';
 import { Segment } from '../models/types';
 import { T, ACTIVITY_COLORS, PLACE_COLORS } from '../utils/theme';
-import {
-  formatDistance,
-  formatDuration,
-  formatTime,
-} from '../utils/geo';
+import { formatDistance, formatDuration, formatTime } from '../utils/geo';
 
 export default function TimelineScreen() {
   const { todayLog, selectedDate } = useTrackingStore();
   const setSelectedDate = useTrackingStore(s => s.setSelectedDate);
   const [expanded, setExpanded] = useState<string | null>(null);
-
-  const dayOffset = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const sel = parseISO(selectedDate);
-    sel.setHours(0, 0, 0, 0);
-    return Math.round((sel.getTime() - today.getTime()) / 86400000);
-  }, [selectedDate]);
 
   const dateLabel = useMemo(() => {
     if (isToday(parseISO(selectedDate))) return 'Today';
@@ -48,18 +36,21 @@ export default function TimelineScreen() {
   }, [selectedDate, setSelectedDate]);
 
   const stats = useMemo(() => {
-    if (!todayLog) return { dist: 0, places: 0 };
-    return { dist: todayLog.totalDistance, places: todayLog.placesVisited };
+    if (!todayLog) return { dist: 0, places: 0, moving: 0 };
+    return {
+      dist: todayLog.totalDistance,
+      places: todayLog.placesVisited,
+      moving: todayLog.totalMovingTime,
+    };
   }, [todayLog]);
 
   const segments = todayLog?.segments || [];
   const isCurrentDay = isToday(parseISO(selectedDate));
 
   const renderSegment = useCallback(
-    ({ item, index }: { item: Segment; index: number }) => (
+    ({ item }: { item: Segment }) => (
       <SegmentCard
         seg={item}
-        idx={index}
         isExpanded={expanded === item.id}
         onToggle={() =>
           setExpanded(expanded === item.id ? null : item.id)
@@ -97,6 +88,24 @@ export default function TimelineScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Summary chips */}
+      {stats.dist > 0 && (
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryValue}>{formatDistance(stats.dist)}</Text>
+            <Text style={styles.summaryLabel}>Distance</Text>
+          </View>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryValue}>{formatDuration(stats.moving)}</Text>
+            <Text style={styles.summaryLabel}>Moving</Text>
+          </View>
+          <View style={styles.summaryChip}>
+            <Text style={styles.summaryValue}>{stats.places}</Text>
+            <Text style={styles.summaryLabel}>Places</Text>
+          </View>
+        </View>
+      )}
 
       {/* Mini time bar */}
       <TimeBar segments={segments} />
@@ -176,12 +185,10 @@ function TimeBar({ segments }: { segments: Segment[] }) {
 
 function SegmentCard({
   seg,
-  idx,
   isExpanded,
   onToggle,
 }: {
   seg: Segment;
-  idx: number;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
@@ -372,6 +379,40 @@ const styles = StyleSheet.create({
   disabled: {
     backgroundColor: 'transparent',
     borderColor: 'transparent',
+  },
+
+  // Summary chips
+  summaryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: T.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: T.border,
+  },
+  summaryChip: {
+    flex: 1,
+    backgroundColor: T.card,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: T.border,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  summaryValue: {
+    color: T.text,
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: -0.3,
+  },
+  summaryLabel: {
+    color: T.textSub,
+    fontSize: 9,
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
 
   // Time bar

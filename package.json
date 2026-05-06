@@ -11,15 +11,20 @@
   },
   "dependencies": {
     "@op-engineering/op-sqlite": "^15.2.12",
-    "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-native/new-app-screen": "0.85.2",
     "@react-navigation/bottom-tabs": "^7.15.11",
     "@react-navigation/native": "^7.2.2",
     "@rnmapbox/maps": "^10.3.0",
+    "babel-plugin-transform-inline-environment-variables": "^0.4.4",
+    "babel-preset-expo": "^55.0.21",
     "date-fns": "^4.1.0",
+    "expo": "^55.0.20",
+    "expo-battery": "~55.0.13",
+    "expo-location": "~55.1.8",
+    "expo-sensors": "~55.0.13",
+    "expo-task-manager": "~55.0.15",
     "react": "19.2.3",
     "react-native": "0.85.2",
-    "react-native-background-geolocation": "^5.1.1",
     "react-native-safe-area-context": "^5.7.0",
     "react-native-screens": "^4.24.0",
     "react-native-svg": "^15.15.4",
@@ -49,5 +54,18 @@
   },
   "engines": {
     "node": ">= 22.11.0"
+  },
+  "codegenConfig": {
+    "name": "LifeMapSpec",
+    "type": "modules",
+    "jsSrcsDir": "src/native",
+    "android": {
+      "javaPackageName": "com.lifemap.codegen"
+    },
+    "ios": {
+      "modulesProvider": {
+        "ActivityRecognition": "RCTActivityRecognition"
+      }
+    }
   }
 }
