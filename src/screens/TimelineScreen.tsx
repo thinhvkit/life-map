@@ -14,9 +14,15 @@ import { T, ACTIVITY_COLORS, PLACE_COLORS } from '../utils/theme';
 import { formatDistance, formatDuration, formatTime } from '../utils/geo';
 
 export default function TimelineScreen() {
-  const { todayLog, selectedDate } = useTrackingStore();
+  const todayLog = useTrackingStore(s => s.todayLog);
+  const selectedDate = useTrackingStore(s => s.selectedDate);
   const setSelectedDate = useTrackingStore(s => s.setSelectedDate);
   const [expanded, setExpanded] = useState<string | null>(null);
+  if (__DEV__) {
+    console.log(
+      `[Timeline] render date=${selectedDate} segs=${todayLog?.segments.length ?? 0}`,
+    );
+  }
 
   const dateLabel = useMemo(() => {
     if (isToday(parseISO(selectedDate))) return 'Today';

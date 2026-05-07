@@ -13,13 +13,13 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.WritableMap
-import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.google.android.gms.location.DetectedActivity
+import android.util.Log
 import com.lifemap.BuildConfig
 import com.lifemap.codegen.NativeActivityRecognitionSpec
 
@@ -83,11 +83,11 @@ class ActivityRecognitionModule(reactContext: ReactApplicationContext) :
             receiver = ActivityReceiver()
             val filter = IntentFilter(ACTION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val flags = if (BuildConfig.DEBUG) Context.RECEIVER_EXPORTED else Context.RECEIVER_NOT_EXPORTED
-                context.registerReceiver(receiver, filter, flags)
+                context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
             } else {
                 context.registerReceiver(receiver, filter)
             }
+            Log.d("ActivityRecognition", "Receiver registered for action: $ACTION")
 
             client = ActivityRecognition.getClient(context)
             client?.requestActivityUpdates(intervalMs.toLong(), pendingIntent!!)
@@ -135,10 +135,6 @@ class ActivityRecognitionModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    override fun addListener(eventName: String) {}
-
-    override fun removeListeners(count: Double) {}
-
     override fun invalidate() {
         try {
             pendingIntent?.let { pi -> client?.removeActivityUpdates(pi) }
@@ -151,6 +147,7 @@ class ActivityRecognitionModule(reactContext: ReactApplicationContext) :
 
     inner class ActivityReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            Log.d("ActivityRecognition", "onReceive called, intent=$intent")
             if (intent == null) return
 
             // Debug simulation: accept plain extras
@@ -179,8 +176,6 @@ class ActivityRecognitionModule(reactContext: ReactApplicationContext) :
     }
 
     private fun sendEvent(params: WritableMap) {
-        reactApplicationContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit("onActivityChange", params)
+        emitOnActivityChange(params)
     }
 }

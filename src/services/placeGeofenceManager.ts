@@ -5,6 +5,8 @@ import { BACKGROUND_GEOFENCING_TASK } from './backgroundTasks';
 
 const GEOFENCE_PREFIX = 'known-place:';
 const MIN_RADIUS = 200;
+const MAX_RADIUS = 500;
+const RADIUS_PADDING = 2.5;
 const MAX_GEOFENCES = 20; // iOS limit
 
 class PlaceGeofenceManager {
@@ -23,7 +25,7 @@ class PlaceGeofenceManager {
           identifier: `${GEOFENCE_PREFIX}${place.id}`,
           latitude: place.latitude,
           longitude: place.longitude,
-          radius: Math.max(MIN_RADIUS, place.radius * 2),
+          radius: Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, place.radius * RADIUS_PADDING)),
           notifyOnEnter: true,
           notifyOnExit: true,
         });
@@ -87,7 +89,7 @@ class PlaceGeofenceManager {
       identifier: `${GEOFENCE_PREFIX}${place.id}`,
       latitude: place.latitude,
       longitude: place.longitude,
-      radius: Math.max(MIN_RADIUS, place.radius * 2),
+      radius: Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, place.radius * RADIUS_PADDING)),
       notifyOnEnter: true,
       notifyOnExit: true,
     };

@@ -47,6 +47,40 @@ export default function App() {
         useTrackingStore.setState((state) => ({
           dayLogs: { ...state.dayLogs, [mockLog.date]: mockLog },
         }));
+
+        // Expose simulation helper on global for dev console
+        (global as any).sim = {
+          walk: () => trackingService.simulateRoute(
+            [[10.7731, 106.7030], [10.7735, 106.6995], [10.7750, 106.6975], [10.7770, 106.6950]],
+            30000, 'walking',
+          ),
+          cycle: () => trackingService.simulateRoute(
+            [[10.7735, 106.6995], [10.7770, 106.6950], [10.7800, 106.6920], [10.7845, 106.6870]],
+            20000, 'cycling',
+          ),
+          drive: () => trackingService.simulateRoute(
+            [[10.7845, 106.6870], [10.7810, 106.6930], [10.7770, 106.6985], [10.7731, 106.7030]],
+            15000, 'driving',
+          ),
+          stop: () => trackingService.stopSimulation(),
+          // Stay stationary at a coord for N seconds (default 150s = qualifies as place)
+          stay: (coord: [number, number] = [10.7731, 106.7030], seconds = 150) =>
+            trackingService.simulateStay(coord, seconds * 1000),
+          clearToday: async () => {
+            const today = new Date().toISOString().split('T')[0];
+            const n = await database.clearDate(today);
+            const store = useTrackingStore.getState();
+            const next = { ...store.dayLogs };
+            delete next[today];
+            useTrackingStore.setState({
+              dayLogs: next,
+              todayLog: null,
+              livePoints: [],
+            });
+            await store.loadDayLog(today);
+            console.log(`[Sim] Cleared today (${n} segments)`);
+          },
+        };
       }
 
       setReady(true);

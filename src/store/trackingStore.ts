@@ -11,6 +11,11 @@ import {
 import { simplifyRoute } from '../utils/routeSimplify';
 import { database } from '../services/database';
 
+interface LivePoint {
+  latitude: number;
+  longitude: number;
+}
+
 interface TrackingStore extends TrackingState {
   setTracking: (isTracking: boolean) => void;
   updatePosition: (point: GpsPoint) => void;
@@ -21,6 +26,9 @@ interface TrackingStore extends TrackingState {
   setPowerProfile: (profile: PowerProfile) => void;
   setCharging: (isCharging: boolean) => void;
   dayLogs: Record<string, DayLog>;
+  livePoints: LivePoint[];
+  appendLivePoint: (point: LivePoint) => void;
+  clearLivePoints: () => void;
 }
 
 const todayKey = () => format(new Date(), 'yyyy-MM-dd');
@@ -35,6 +43,12 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
   currentPowerProfile: 'balanced',
   isCharging: false,
   dayLogs: {},
+  livePoints: [],
+
+  appendLivePoint: point =>
+    set(state => ({ livePoints: [...state.livePoints, point] })),
+
+  clearLivePoints: () => set({ livePoints: [] }),
 
   setTracking: isTracking => set({ isTracking }),
   setPowerProfile: profile => set({ currentPowerProfile: profile }),
@@ -55,8 +69,10 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
   },
 
   addSegment: segment => {
+    console.log(`[addSegment] type=${segment.type} pts=${segment.points.length}`);
     const dateKey = format(new Date(segment.startTime), 'yyyy-MM-dd');
-    const dayLogs = { ...get().dayLogs };
+    const prevDayLogs = get().dayLogs;
+    const prevLog = prevDayLogs[dateKey] ?? createEmptyDayLog(dateKey);
 
     if (segment.type === 'trip' && segment.points.length > 2) {
       segment.simplifiedPoints = simplifyRoute(
@@ -68,31 +84,36 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
       );
     }
 
-    if (!dayLogs[dateKey]) {
-      dayLogs[dateKey] = createEmptyDayLog(dateKey);
-    }
-
-    const dayLog = dayLogs[dateKey];
-    dayLog.segments.push(segment);
-
     const duration = segment.endTime - segment.startTime;
-    if (segment.type === 'trip') {
-      dayLog.totalDistance += segment.distance || 0;
-      dayLog.totalMovingTime += duration;
-    } else {
-      dayLog.totalStationaryTime += duration;
-      if (segment.place) dayLog.placesVisited += 1;
-    }
-    dayLog.activityBreakdown[segment.activity] =
-      (dayLog.activityBreakdown[segment.activity] || 0) + duration;
+    const breakdown = { ...prevLog.activityBreakdown };
+    breakdown[segment.activity] =
+      (breakdown[segment.activity] || 0) + duration;
 
-    set({ dayLogs });
+    const nextLog: DayLog = {
+      ...prevLog,
+      segments: [...prevLog.segments, segment],
+      totalDistance:
+        prevLog.totalDistance +
+        (segment.type === 'trip' ? segment.distance || 0 : 0),
+      totalMovingTime:
+        prevLog.totalMovingTime + (segment.type === 'trip' ? duration : 0),
+      totalStationaryTime:
+        prevLog.totalStationaryTime + (segment.type === 'visit' ? duration : 0),
+      placesVisited:
+        prevLog.placesVisited +
+        (segment.type === 'visit' && segment.place ? 1 : 0),
+      activityBreakdown: breakdown,
+    };
 
-    if (dateKey === todayKey()) {
-      set({ todayLog: dayLog });
-    }
+    const nextDayLogs = { ...prevDayLogs, [dateKey]: nextLog };
 
-    persistSegmentAndDayLog(dateKey, segment, dayLog);
+    set({
+      dayLogs: nextDayLogs,
+      ...(dateKey === todayKey() ? { todayLog: nextLog } : {}),
+      ...(segment.type === 'trip' ? { livePoints: [] } : {}),
+    });
+
+    persistSegmentAndDayLog(dateKey, segment, nextLog);
   },
 
   setSelectedDate: date => {
@@ -144,7 +165,8 @@ async function persistSegmentAndDayLog(
   try {
     await database.insertSegment(segment, dateKey);
     await database.upsertDayLog(dayLog);
+    console.log(`[persist] OK type=${segment.type} pts=${segment.points.length}`);
   } catch (error) {
-    console.warn('[Store] Failed to persist:', error);
+    console.warn('[persist] FAIL:', JSON.stringify(error), (error as any)?.message);
   }
 }

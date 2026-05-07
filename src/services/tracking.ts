@@ -1,4 +1,4 @@
-import { Platform, PermissionsAndroid, Alert, Linking } from 'react-native';
+import { Platform, PermissionsAndroid, AppState, Alert, Linking } from 'react-native';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import {
@@ -31,6 +31,9 @@ class TrackingService {
   private isCharging = false;
   private batteryLevelSub: Battery.Subscription | null = null;
   private batteryStateSub: Battery.Subscription | null = null;
+  private pendingConfig: ExpoLocationConfig | null = null;
+  private lastLivePoint: { latitude: number; longitude: number } | null = null;
+  private simActivity: ActivityType | null = null;
 
   async configure(
     _settings: AppSettings = DEFAULT_SETTINGS,
@@ -87,6 +90,12 @@ class TrackingService {
       await this.restartLocationUpdates(config);
     });
 
+    AppState.addEventListener('change', (state) => {
+      if (state === 'active' && this.pendingConfig) {
+        this.restartLocationUpdates(this.pendingConfig);
+      }
+    });
+
     placeGeofenceManager.onGeofenceEnter((placeId: string) => {
       const place = placeDetectionService.getPlace(placeId);
       powerManager.onGeofenceEnter(place?.category ?? null);
@@ -139,6 +148,7 @@ class TrackingService {
     this.batteryLevelSub = null;
     this.batteryStateSub = null;
 
+    useTrackingStore.getState().clearLivePoints();
     useTrackingStore.getState().setTracking(false);
   }
 
@@ -160,22 +170,26 @@ class TrackingService {
     }
     if (!isRunning) return;
 
-    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: config.accuracy,
-      distanceInterval: config.distanceInterval,
-      deferredUpdatesInterval: config.deferredUpdatesInterval,
-      activityType: Location.ActivityType.OtherNavigation,
-      showsBackgroundLocationIndicator: true,
-      pausesUpdatesAutomatically: false,
-      foregroundService: {
-        notificationTitle: 'Life Map',
-        notificationBody: 'Tracking your location',
-      },
-    });
-
-    this.restartHeartbeat();
-    console.log(`[Tracking] Restarted with accuracy=${config.accuracy}, dist=${config.distanceInterval}m`);
+    try {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+        accuracy: config.accuracy,
+        distanceInterval: config.distanceInterval,
+        deferredUpdatesInterval: config.deferredUpdatesInterval,
+        activityType: Location.ActivityType.OtherNavigation,
+        showsBackgroundLocationIndicator: true,
+        pausesUpdatesAutomatically: false,
+        foregroundService: {
+          notificationTitle: 'Life Map',
+          notificationBody: 'Tracking your location',
+        },
+      });
+      this.pendingConfig = null;
+      this.restartHeartbeat();
+      console.log(`[Tracking] Restarted with accuracy=${config.accuracy}, dist=${config.distanceInterval}m`);
+    } catch {
+      this.pendingConfig = config;
+    }
   }
 
   private setupBatteryMonitoring(): void {
@@ -203,8 +217,14 @@ class TrackingService {
 
   private onLocation(location: Location.LocationObject): void {
     const point = this.locationToGpsPoint(location);
+    if (__DEV__) {
+      console.log(`[Location] ${point.latitude.toFixed(5)},${point.longitude.toFixed(5)} spd=${point.speed.toFixed(1)} acc=${point.accuracy.toFixed(0)}m`);
+    }
 
-    if (motionDetector.isUsingNative()) {
+    if (this.simActivity) {
+      point.activity = this.simActivity;
+      point.confidence = 100;
+    } else if (motionDetector.isUsingNative()) {
       const { activity, confidence } = motionDetector.getLastActivity();
       point.activity = activity;
       point.confidence = confidence;
@@ -220,6 +240,23 @@ class TrackingService {
     useTrackingStore.getState().updatePosition(point);
     useTrackingStore.getState().updateCurrentActivity(point.activity);
     this.currentPoints.push(point);
+
+    if (this.isMoving) {
+      const last = this.lastLivePoint;
+      const moved =
+        !last ||
+        haversineDistance(
+          last.latitude,
+          last.longitude,
+          point.latitude,
+          point.longitude,
+        ) > 5;
+      if (moved) {
+        const live = { latitude: point.latitude, longitude: point.longitude };
+        useTrackingStore.getState().appendLivePoint(live);
+        this.lastLivePoint = live;
+      }
+    }
   }
 
   private onNativeActivityChange(activity: ActivityType, confidence: number): void {
@@ -231,24 +268,36 @@ class TrackingService {
     powerManager.onMotionChange(isMoving);
 
     const wasMoving = this.isMoving;
-    this.isMoving = isMoving;
-
     if (wasMoving !== isMoving) {
+      // Finalize the segment we're CLOSING (uses old this.isMoving for type)
       this.finalizeCurrentSegment();
+      this.isMoving = isMoving;
       this.startNewSegment();
+    } else {
+      this.isMoving = isMoving;
     }
   }
 
   private startNewSegment(): void {
     this.currentPoints = [];
     this.segmentStartTime = Date.now();
+    this.lastLivePoint = null;
+    useTrackingStore.getState().clearLivePoints();
   }
 
   private async finalizeCurrentSegment(): Promise<void> {
-    if (this.currentPoints.length === 0) return;
+    if (this.currentPoints.length === 0) {
+      if (__DEV__) console.log('[Finalize] skipped: no points');
+      return;
+    }
 
     const now = Date.now();
     const segmentType = this.isMoving ? 'trip' : 'visit';
+    if (__DEV__) {
+      console.log(
+        `[Finalize] type=${segmentType} points=${this.currentPoints.length} dur=${Math.round((now - this.segmentStartTime) / 1000)}s`,
+      );
+    }
 
     const segment: Segment = {
       id: generateId(),
@@ -337,6 +386,151 @@ class TrackingService {
 
   private restartHeartbeat(): void {
     this.startHeartbeat();
+  }
+
+  // ── Dev: simulate a walking route ──
+
+  private simTimer: ReturnType<typeof setInterval> | null = null;
+
+  simulateRoute(
+    waypoints: [number, number][],
+    durationMs = 60000,
+    activity: ActivityType = 'walking',
+  ): void {
+    if (this.simTimer) {
+      clearInterval(this.simTimer);
+      this.simTimer = null;
+    }
+
+    const points: [number, number][] = [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const steps = 10;
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps;
+        points.push([
+          waypoints[i][0] + (waypoints[i + 1][0] - waypoints[i][0]) * t,
+          waypoints[i][1] + (waypoints[i + 1][1] - waypoints[i][1]) * t,
+        ]);
+      }
+    }
+    points.push(waypoints[waypoints.length - 1]);
+
+    const interval = durationMs / points.length;
+    let idx = 0;
+
+    // Tag all points emitted during simulation with the requested activity
+    this.simActivity = activity;
+
+    // Trigger motion start
+    this.onMotionChange(true);
+
+    this.simTimer = setInterval(() => {
+      if (idx >= points.length) {
+        clearInterval(this.simTimer!);
+        this.simTimer = null;
+        this.onMotionChange(false);
+        this.simActivity = null;
+        console.log('[Sim] Route complete');
+        return;
+      }
+
+      const [lat, lng] = points[idx];
+      const speed = activity === 'walking' ? 1.4 : activity === 'cycling' ? 4.5 : 8.0;
+      const fakeLocation: Location.LocationObject = {
+        coords: {
+          latitude: lat,
+          longitude: lng,
+          altitude: 10,
+          accuracy: 8,
+          speed,
+          heading: 0,
+          altitudeAccuracy: 3,
+        },
+        timestamp: Date.now(),
+      };
+      this.onLocation(fakeLocation);
+      idx++;
+    }, interval);
+
+    console.log(`[Sim] Started ${points.length} points over ${durationMs}ms (${activity})`);
+  }
+
+  stopSimulation(): void {
+    if (this.simTimer) {
+      clearInterval(this.simTimer);
+      this.simTimer = null;
+      this.onMotionChange(false);
+      this.simActivity = null;
+      console.log('[Sim] Stopped');
+    }
+  }
+
+  // Dev: simulate being stationary at a coordinate for `durationMs`,
+  // emitting one point every 5 seconds. After it ends, finalizes the
+  // visit by triggering a motion-change still→moving (and back to still).
+  simulateStay(
+    coord: [number, number],
+    durationMs = 150000,
+  ): void {
+    if (this.simTimer) {
+      clearInterval(this.simTimer);
+      this.simTimer = null;
+    }
+
+    this.simActivity = 'stationary';
+
+    // Make sure we're in 'still' state and a fresh segment starts
+    this.onMotionChange(false);
+    if (this.currentPoints.length === 0) {
+      // startNewSegment was a no-op since we were already still — force timestamp
+      this.startNewSegment();
+    }
+
+    const tickMs = 5000;
+    const totalTicks = Math.max(1, Math.floor(durationMs / tickMs));
+    let idx = 0;
+
+    // Emit first point immediately so finalize has data even on short stays
+    this.emitFakeStay(coord);
+
+    this.simTimer = setInterval(() => {
+      idx++;
+      if (idx >= totalTicks) {
+        clearInterval(this.simTimer!);
+        this.simTimer = null;
+        // Finalize the visit by transitioning still → moving
+        this.onMotionChange(true);
+        // Then back to still so next sim is clean
+        this.onMotionChange(false);
+        this.simActivity = null;
+        console.log('[Sim] Stay complete');
+        return;
+      }
+      this.emitFakeStay(coord);
+    }, tickMs);
+
+    console.log(
+      `[Sim] Started stay at ${coord[0]},${coord[1]} for ${Math.round(durationMs / 1000)}s`,
+    );
+  }
+
+  private emitFakeStay(coord: [number, number]): void {
+    const [lat, lng] = coord;
+    // Tiny GPS jitter so points aren't identical
+    const jitter = () => (Math.random() - 0.5) * 0.00002;
+    const fakeLocation: Location.LocationObject = {
+      coords: {
+        latitude: lat + jitter(),
+        longitude: lng + jitter(),
+        altitude: 10,
+        accuracy: 6,
+        speed: 0,
+        heading: 0,
+        altitudeAccuracy: 3,
+      },
+      timestamp: Date.now(),
+    };
+    this.onLocation(fakeLocation);
   }
 }
 

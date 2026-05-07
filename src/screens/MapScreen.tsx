@@ -21,7 +21,10 @@ export default function MapScreen() {
   const cameraRef = useRef<MapboxGL.Camera>(null);
   const [selectedPlace, setSelectedPlace] = useState<Segment | null>(null);
 
-  const { isTracking, currentPosition, todayLog, selectedDate } = useTrackingStore();
+  const isTracking = useTrackingStore(s => s.isTracking);
+  const currentPosition = useTrackingStore(s => s.currentPosition);
+  const todayLog = useTrackingStore(s => s.todayLog);
+  const livePoints = useTrackingStore(s => s.livePoints);
 
   const trips = useMemo(() => {
     if (!todayLog) return [];
@@ -38,6 +41,24 @@ export default function MapScreen() {
       });
     return [...seen.values()];
   }, [todayLog]);
+
+  const liveShape = useMemo(() => {
+    if (livePoints.length < 2) return null;
+    return {
+      type: 'Feature' as const,
+      properties: {},
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: livePoints.map(p => [p.longitude, p.latitude]),
+      },
+    };
+  }, [livePoints]);
+
+  const handleSelectPlace = useCallback((seg: Segment) => {
+    setSelectedPlace(prev =>
+      prev?.place?.name === seg.place?.name ? null : seg,
+    );
+  }, []);
 
   const stats = useMemo(() => {
     if (!todayLog) {
@@ -151,52 +172,32 @@ export default function MapScreen() {
           );
         })}
 
-        {/* Place markers */}
-        {uniquePlaces.map(seg => {
-          const place = seg.place!;
-          const color = PLACE_COLORS[place.category || 'other'];
-          const icon = PLACE_ICONS[place.category || 'other'];
-          const isSelected = selectedPlace?.place?.name === place.name;
+        {/* Live in-progress polyline */}
+        {isTracking && liveShape && (
+          <MapboxGL.ShapeSource id="live-trip" shape={liveShape}>
+            <MapboxGL.LineLayer
+              id="live-trip-line"
+              style={{
+                lineColor: T.accent,
+                lineWidth: 4,
+                lineOpacity: 0.9,
+                lineCap: 'round',
+                lineJoin: 'round',
+                lineDasharray: [2, 1.5],
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        )}
 
-          return (
-            <MapboxGL.MarkerView
-              key={place.name}
-              id={`place-${place.id}`}
-              coordinate={[place.longitude, place.latitude]}
-            >
-              <TouchableOpacity
-                onPress={() =>
-                  setSelectedPlace(isSelected ? null : seg)
-                }
-                activeOpacity={0.8}
-                style={styles.markerContainer}
-              >
-                <View style={[styles.markerOuter, { backgroundColor: color + '1F' }]}>
-                  <View
-                    style={[
-                      styles.markerInner,
-                      {
-                        backgroundColor: color,
-                        borderColor: isSelected ? '#fff' : T.card,
-                        borderWidth: isSelected ? 2.5 : 2,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.markerIcon}>{icon}</Text>
-                  </View>
-                </View>
-                <Text
-                  style={styles.markerLabel}
-                  numberOfLines={1}
-                >
-                  {place.name.length > 14
-                    ? place.name.slice(0, 13) + '…'
-                    : place.name}
-                </Text>
-              </TouchableOpacity>
-            </MapboxGL.MarkerView>
-          );
-        })}
+        {/* Place markers */}
+        {uniquePlaces.map(seg => (
+          <PlaceMarker
+            key={seg.place!.name}
+            segment={seg}
+            isSelected={selectedPlace?.place?.name === seg.place!.name}
+            onPress={handleSelectPlace}
+          />
+        ))}
 
         {/* Current location */}
         {isTracking && currentPosition && (
@@ -243,6 +244,14 @@ export default function MapScreen() {
 
       {/* FABs */}
       <View style={styles.fabContainer}>
+        {__DEV__ && (
+          <TouchableOpacity
+            style={[styles.fabSmall, { backgroundColor: '#7C3AED' }]}
+            onPress={() => (global as any).sim?.walk()}
+          >
+            <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>SIM</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.fabSmall} onPress={handleCenterOnUser}>
           <CrosshairIcon />
         </TouchableOpacity>
@@ -261,6 +270,51 @@ export default function MapScreen() {
     </View>
   );
 }
+
+const PlaceMarker = React.memo(function PlaceMarker({
+  segment,
+  isSelected,
+  onPress,
+}: {
+  segment: Segment;
+  isSelected: boolean;
+  onPress: (seg: Segment) => void;
+}) {
+  const place = segment.place!;
+  const color = PLACE_COLORS[place.category || 'other'];
+  const icon = PLACE_ICONS[place.category || 'other'];
+
+  return (
+    <MapboxGL.MarkerView
+      id={`place-${place.id}`}
+      coordinate={[place.longitude, place.latitude]}
+    >
+      <TouchableOpacity
+        onPress={() => onPress(segment)}
+        activeOpacity={0.8}
+        style={styles.markerContainer}
+      >
+        <View style={[styles.markerOuter, { backgroundColor: color + '1F' }]}>
+          <View
+            style={[
+              styles.markerInner,
+              {
+                backgroundColor: color,
+                borderColor: isSelected ? '#fff' : T.card,
+                borderWidth: isSelected ? 2.5 : 2,
+              },
+            ]}
+          >
+            <Text style={styles.markerIcon}>{icon}</Text>
+          </View>
+        </View>
+        <Text style={styles.markerLabel} numberOfLines={1}>
+          {place.name.length > 14 ? place.name.slice(0, 13) + '…' : place.name}
+        </Text>
+      </TouchableOpacity>
+    </MapboxGL.MarkerView>
+  );
+});
 
 function PlacePopup({
   segment,

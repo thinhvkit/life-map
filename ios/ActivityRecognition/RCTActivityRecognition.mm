@@ -8,7 +8,6 @@
 @implementation RCTActivityRecognition {
   CMMotionActivityManager *_activityManager;
   BOOL _isRunning;
-  BOOL _hasListeners;
 }
 
 RCT_EXPORT_MODULE(ActivityRecognition)
@@ -18,7 +17,6 @@ RCT_EXPORT_MODULE(ActivityRecognition)
   if (self) {
     _activityManager = [[CMMotionActivityManager alloc] init];
     _isRunning = NO;
-    _hasListeners = NO;
   }
   return self;
 }
@@ -135,25 +133,19 @@ RCT_EXPORT_MODULE(ActivityRecognition)
 
 - (void)isAvailable:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject {
-  resolve(@([CMMotionActivityManager isActivityAvailable]));
-}
-
-- (void)addListener:(NSString *)eventName {
-  _hasListeners = YES;
-}
-
-- (void)removeListeners:(double)count {
-  if (count == 0) {
-    _hasListeners = NO;
+  if (![CMMotionActivityManager isActivityAvailable]) {
+    resolve(@NO);
+    return;
   }
-}
-
-#pragma mark - Event Emission
-
-- (void)emitOnActivityChange:(NSDictionary *)body {
-  if (_hasListeners && _eventEmitterCallback) {
-    _eventEmitterCallback("onActivityChange", body);
+  if (@available(iOS 11.0, *)) {
+    CMAuthorizationStatus status = [CMMotionActivityManager authorizationStatus];
+    if (status == CMAuthorizationStatusDenied ||
+        status == CMAuthorizationStatusRestricted) {
+      resolve(@NO);
+      return;
+    }
   }
+  resolve(@YES);
 }
 
 #pragma mark - TurboModule

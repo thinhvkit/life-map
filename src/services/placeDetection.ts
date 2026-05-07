@@ -9,6 +9,8 @@ const MAX_MERGE_RADIUS = 200;
 const MIN_MERGE_RADIUS = 25;
 const GEOCODE_CACHE_TTL = 86400000; // 24h
 const GEOCODE_MIN_INTERVAL = 1500; // Nominatim rate limit: 1 req/s
+const PENDING_LABEL = 'Pending...';
+const RETRY_INTERVAL = 30000; // 30s
 
 interface GpsCluster {
   centroid: { latitude: number; longitude: number };
@@ -29,17 +31,30 @@ interface GeocodeCache {
   timestamp: number;
 }
 
+interface PendingGeocode {
+  placeId: string;
+  latitude: number;
+  longitude: number;
+}
+
 class PlaceDetectionService {
   private knownPlaces: Place[] = [];
   private geocodeCache: GeocodeCache[] = [];
   private lastGeocodeTime = 0;
   private initialized = false;
+  private pendingQueue: PendingGeocode[] = [];
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
     database.init();
     this.knownPlaces = await database.getAllPlaces();
     this.initialized = true;
+
+    const pending = this.knownPlaces.filter(p => p.name === PENDING_LABEL);
+    for (const p of pending) {
+      this.enqueue(p.id, p.latitude, p.longitude);
+    }
   }
 
   async evaluateVisit(
@@ -69,19 +84,22 @@ class PlaceDetectionService {
       return existing;
     }
 
+    const placeId = generateId();
     const geocoded = await this.reverseGeocode(
       cluster.centroid.latitude,
       cluster.centroid.longitude,
     );
 
+    const isPending = geocoded.name === PENDING_LABEL;
+
     const place: Place = {
-      id: generateId(),
-      name: geocoded.name || 'Unknown Place',
+      id: placeId,
+      name: isPending ? PENDING_LABEL : (geocoded.name || 'Unknown Place'),
       address: geocoded.address,
       latitude: cluster.centroid.latitude,
       longitude: cluster.centroid.longitude,
       radius: Math.max(MIN_MERGE_RADIUS, Math.min(cluster.radius * 1.5, MAX_MERGE_RADIUS)),
-      category: this.inferCategory(geocoded.type, geocoded.osmClass),
+      category: isPending ? 'other' : this.inferCategory(geocoded.type, geocoded.osmClass),
       visitCount: 1,
       totalDuration: endTime - startTime,
       firstVisit: startTime,
@@ -90,6 +108,11 @@ class PlaceDetectionService {
 
     this.knownPlaces.push(place);
     await database.upsertPlace(place);
+
+    if (isPending) {
+      this.enqueue(placeId, cluster.centroid.latitude, cluster.centroid.longitude);
+    }
+
     console.log(`[Place] New: "${place.name}" (${place.category}) r=${Math.round(place.radius)}m, dwell=${Math.round(dwellSeconds)}s`);
     return place;
   }
@@ -226,7 +249,47 @@ class PlaceDetectionService {
 
       return result;
     } catch {
-      return { name: 'Unknown Place' };
+      return { name: PENDING_LABEL };
+    }
+  }
+
+  private enqueue(placeId: string, latitude: number, longitude: number): void {
+    if (this.pendingQueue.some(p => p.placeId === placeId)) return;
+    this.pendingQueue.push({ placeId, latitude, longitude });
+    this.scheduleRetry();
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer || this.pendingQueue.length === 0) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.flushPending();
+    }, RETRY_INTERVAL);
+  }
+
+  private async flushPending(): Promise<void> {
+    if (this.pendingQueue.length === 0) return;
+
+    const item = this.pendingQueue[0];
+    const geocoded = await this.reverseGeocode(item.latitude, item.longitude);
+
+    if (geocoded.name === PENDING_LABEL) {
+      this.scheduleRetry();
+      return;
+    }
+
+    this.pendingQueue.shift();
+    const place = this.knownPlaces.find(p => p.id === item.placeId);
+    if (place) {
+      place.name = geocoded.name || 'Unknown Place';
+      place.address = geocoded.address;
+      place.category = this.inferCategory(geocoded.type, geocoded.osmClass);
+      await database.upsertPlace(place);
+      console.log(`[Place] Resolved pending: "${place.name}" (${place.category})`);
+    }
+
+    if (this.pendingQueue.length > 0) {
+      this.scheduleRetry();
     }
   }
 

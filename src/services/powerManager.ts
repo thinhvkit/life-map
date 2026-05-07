@@ -18,9 +18,9 @@ export interface ExpoLocationConfig {
 const PROFILE_CONFIGS: Record<PowerProfile, PowerProfileConfig> = {
   sleep: {
     desiredAccuracy: 1, // Lowest
-    distanceFilter: 500,
+    distanceFilter: 1000,
     stopTimeout: 1,
-    heartbeatInterval: 900,
+    heartbeatInterval: 1800,
     stationaryRadius: 200,
     elasticityMultiplier: 0,
     preventSuspend: false,
@@ -195,10 +195,10 @@ class PowerManager {
     if (ctx.isCharging && ctx.isMoving) return 'high_accuracy';
     if (ctx.isCharging && !ctx.isMoving) return 'balanced';
     if (ctx.isPowerSaveMode) return 'low_power';
-    if (ctx.isNightMode && ctx.minutesStationary > 30) return 'sleep';
+    if (ctx.isNightMode && ctx.minutesStationary > 15) return 'sleep';
     if (ctx.atKnownPlace && !ctx.isMoving) return 'geofence_only';
-    if (ctx.batteryLevel < 15) return 'low_power';
-    if (!ctx.isMoving && ctx.minutesStationary > 5) return 'low_power';
+    if (ctx.batteryLevel < 20) return 'low_power';
+    if (!ctx.isMoving && ctx.minutesStationary > 8) return 'low_power';
     if (ctx.batteryLevel < 30) return 'balanced';
     if (
       ctx.currentActivity === 'walking' ||

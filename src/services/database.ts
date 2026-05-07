@@ -336,6 +336,24 @@ class Database {
     const result = await db.execute('SELECT place_id FROM geofenced_places');
     return result.rows.map(r => r.place_id as string);
   }
+
+  // ── Dev: clear all data for a date ──
+
+  async clearDate(date: string): Promise<number> {
+    const db = this.getDb();
+    const segIds = await db.execute(
+      'SELECT id FROM segments WHERE date = ?',
+      [date],
+    );
+    const ids = segIds.rows.map(r => r.id as string);
+    for (const id of ids) {
+      await db.execute('DELETE FROM gps_points WHERE segment_id = ?', [id]);
+      await db.execute('DELETE FROM simplified_points WHERE segment_id = ?', [id]);
+    }
+    await db.execute('DELETE FROM segments WHERE date = ?', [date]);
+    await db.execute('DELETE FROM day_logs WHERE date = ?', [date]);
+    return ids.length;
+  }
 }
 
 function rowToPlace(row: Record<string, any>): Place {

@@ -1,5 +1,5 @@
-import { NativeEventEmitter } from 'react-native';
 import NativeActivityRecognition from './NativeActivityRecognition';
+import type { EventSubscription } from 'react-native';
 
 export type NativeActivityType =
   | 'stationary'
@@ -26,12 +26,7 @@ export interface NativeActivityEvent {
 type ActivityCallback = (event: NativeActivityEvent) => void;
 
 class ActivityRecognition {
-  private emitter: NativeEventEmitter;
-  private subscription: any = null;
-
-  constructor() {
-    this.emitter = new NativeEventEmitter(NativeActivityRecognition);
-  }
+  private subscription: EventSubscription | null = null;
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -45,12 +40,9 @@ class ActivityRecognition {
     callback: ActivityCallback,
     intervalMs: number = 3000
   ): Promise<void> {
-    this.subscription = this.emitter.addListener(
-      'onActivityChange',
-      (event: NativeActivityEvent) => {
-        callback(event);
-      }
-    );
+    this.subscription = NativeActivityRecognition.onActivityChange((event) => {
+      callback(event as NativeActivityEvent);
+    });
     await NativeActivityRecognition.startActivityUpdates(intervalMs);
   }
 
