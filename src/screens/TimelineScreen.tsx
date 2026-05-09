@@ -3,11 +3,12 @@ import {
   View,
   Text,
   FlatList,
+  SectionList,
   StyleSheet,
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { format, subDays, addDays, isToday, parseISO } from 'date-fns';
+import { format } from 'date-fns';
 import { useTrackingStore } from '../store/trackingStore';
 import { Segment } from '../models/types';
 import { T, ACTIVITY_COLORS, PLACE_COLORS } from '../utils/theme';
@@ -15,31 +16,8 @@ import { formatDistance, formatDuration, formatTime } from '../utils/geo';
 
 export default function TimelineScreen() {
   const todayLog = useTrackingStore(s => s.todayLog);
-  const selectedDate = useTrackingStore(s => s.selectedDate);
-  const setSelectedDate = useTrackingStore(s => s.setSelectedDate);
+  const dateMode = useTrackingStore(s => s.dateMode);
   const [expanded, setExpanded] = useState<string | null>(null);
-  if (__DEV__) {
-    console.log(
-      `[Timeline] render date=${selectedDate} segs=${todayLog?.segments.length ?? 0}`,
-    );
-  }
-
-  const dateLabel = useMemo(() => {
-    if (isToday(parseISO(selectedDate))) return 'Today';
-    return format(parseISO(selectedDate), 'EEE, MMM d');
-  }, [selectedDate]);
-
-  const handlePrevDay = useCallback(() => {
-    const prev = format(subDays(parseISO(selectedDate), 1), 'yyyy-MM-dd');
-    setSelectedDate(prev);
-  }, [selectedDate, setSelectedDate]);
-
-  const handleNextDay = useCallback(() => {
-    if (!isToday(parseISO(selectedDate))) {
-      const next = format(addDays(parseISO(selectedDate), 1), 'yyyy-MM-dd');
-      setSelectedDate(next);
-    }
-  }, [selectedDate, setSelectedDate]);
 
   const stats = useMemo(() => {
     if (!todayLog) return { dist: 0, places: 0, moving: 0 };
@@ -51,7 +29,23 @@ export default function TimelineScreen() {
   }, [todayLog]);
 
   const segments = todayLog?.segments || [];
-  const isCurrentDay = isToday(parseISO(selectedDate));
+
+  const sections = useMemo(() => {
+    if (dateMode === 'day' || segments.length === 0) return [];
+    const grouped = new Map<string, Segment[]>();
+    for (const seg of segments) {
+      const key = format(new Date(seg.startTime), 'yyyy-MM-dd');
+      const arr = grouped.get(key) || [];
+      arr.push(seg);
+      grouped.set(key, arr);
+    }
+    return [...grouped.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, data]) => ({
+        title: format(new Date(date + 'T00:00:00'), 'EEE, MMM d'),
+        data,
+      }));
+  }, [segments, dateMode]);
 
   const renderSegment = useCallback(
     ({ item }: { item: Segment }) => (
@@ -68,33 +62,6 @@ export default function TimelineScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Date navigation */}
-      <View style={styles.dateNav}>
-        <TouchableOpacity onPress={handlePrevDay} style={styles.dateArrow}>
-          <Text style={styles.arrowText}>‹</Text>
-        </TouchableOpacity>
-        <View style={styles.dateCenter}>
-          <Text style={styles.dateText}>{dateLabel}</Text>
-          <Text style={styles.dateSummary}>
-            {formatDistance(stats.dist)} · {stats.places} places
-          </Text>
-        </View>
-        <TouchableOpacity
-          onPress={handleNextDay}
-          style={[styles.dateArrow, isCurrentDay && styles.disabled]}
-          disabled={isCurrentDay}
-        >
-          <Text
-            style={[
-              styles.arrowText,
-              isCurrentDay && { color: T.textDim },
-            ]}
-          >
-            ›
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       {/* Summary chips */}
       {stats.dist > 0 && (
         <View style={styles.summaryRow}>
@@ -113,24 +80,42 @@ export default function TimelineScreen() {
         </View>
       )}
 
-      {/* Mini time bar */}
-      <TimeBar segments={segments} />
+      {/* Mini time bar — only for day view */}
+      {dateMode === 'day' && <TimeBar segments={segments} />}
 
       {/* Segments list */}
       {segments.length > 0 ? (
-        <FlatList
-          data={segments}
-          renderItem={renderSegment}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={<EndOfDayMarker />}
-        />
+        dateMode === 'day' ? (
+          <FlatList
+            data={segments}
+            renderItem={renderSegment}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            ListFooterComponent={<EndOfDayMarker />}
+          />
+        ) : (
+          <SectionList
+            sections={sections}
+            renderItem={renderSegment}
+            keyExtractor={item => item.id}
+            renderSectionHeader={({ section }) => (
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionHeaderText}>{section.title}</Text>
+              </View>
+            )}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            stickySectionHeadersEnabled
+          />
+        )
       ) : (
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>No activity recorded</Text>
           <Text style={styles.emptySubtext}>
-            Start tracking to see your daily timeline
+            {dateMode === 'day'
+              ? 'Start tracking to see your daily timeline'
+              : 'No data for this period'}
           </Text>
         </View>
       )}
@@ -347,46 +332,6 @@ const styles = StyleSheet.create({
     backgroundColor: T.bg,
   },
 
-  // Date nav
-  dateNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === 'ios' ? 60 : 14,
-    paddingBottom: 12,
-    backgroundColor: T.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: T.border,
-  },
-  dateArrow: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: T.card,
-    borderWidth: 1,
-    borderColor: T.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowText: {
-    color: T.textSub,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  dateCenter: { alignItems: 'center' },
-  dateText: { color: T.text, fontSize: 16, fontWeight: '600' },
-  dateSummary: {
-    color: T.textSub,
-    fontSize: 12,
-    marginTop: 2,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  disabled: {
-    backgroundColor: 'transparent',
-    borderColor: 'transparent',
-  },
-
   // Summary chips
   summaryRow: {
     flexDirection: 'row',
@@ -582,6 +527,21 @@ const styles = StyleSheet.create({
     color: T.textDim,
     fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+
+  // Section header (month/year mode)
+  sectionHeader: {
+    backgroundColor: T.bg,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: T.border,
+  },
+  sectionHeaderText: {
+    color: T.accent,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 
   // Empty state

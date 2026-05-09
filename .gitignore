@@ -78,3 +78,7 @@ src/config.local.ts
 !.yarn/versions
 
 .expo
+android/app/*.jks
+android/keystore.properties
+package-lock.json
+assets/icons/generated/*

@@ -10,9 +10,16 @@ import { useTrackingStore } from '../store/trackingStore';
 import { ActivityType } from '../models/types';
 import { T, ACTIVITY_COLORS } from '../utils/theme';
 import { formatDistance, formatDuration } from '../utils/geo';
+import { format, parseISO } from 'date-fns';
 
 export default function StatsScreen() {
-  const { todayLog, isTracking, batteryLevel } = useTrackingStore();
+  const { todayLog, isTracking, batteryLevel, dateMode, selectedDate } = useTrackingStore();
+
+  const headerTitle = useMemo(() => {
+    if (dateMode === 'year') return `${format(parseISO(selectedDate), 'yyyy')} Stats`;
+    if (dateMode === 'month') return `${format(parseISO(selectedDate), 'MMMM yyyy')} Stats`;
+    return "Today's Stats";
+  }, [dateMode, selectedDate]);
 
   const stats = useMemo(() => {
     if (!todayLog || todayLog.segments.length === 0) return null;
@@ -66,20 +73,22 @@ export default function StatsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Today's Stats</Text>
-          <View style={styles.statusRow}>
-            <View
-              style={[
-                styles.statusDot,
-                {
-                  backgroundColor: isTracking ? '#16A34A' : '#DC2626',
-                },
-              ]}
-            />
-            <Text style={styles.statusText}>
-              {isTracking ? 'Tracking active' : 'Tracking paused'}
-            </Text>
-          </View>
+          <Text style={styles.headerTitle}>{headerTitle}</Text>
+          {dateMode === 'day' && (
+            <View style={styles.statusRow}>
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor: isTracking ? '#16A34A' : '#DC2626',
+                  },
+                ]}
+              />
+              <Text style={styles.statusText}>
+                {isTracking ? 'Tracking active' : 'Tracking paused'}
+              </Text>
+            </View>
+          )}
         </View>
         <View style={styles.batteryInfo}>
           <Text style={styles.batteryLabel}>Battery used</Text>
@@ -173,54 +182,58 @@ export default function StatsScreen() {
         })}
       </View>
 
-      {/* Weekly distance sparkline */}
-      <SectionLabel>This Week</SectionLabel>
-      <View style={styles.weekCard}>
-        <View style={styles.weekBars}>
-          {weekDist.map((d, i) => {
-            const h = maxW > 0 ? (d / maxW) * 100 : 0;
-            const isToday = i === 6;
-            return (
-              <View key={i} style={styles.weekBarCol}>
+      {/* Weekly distance sparkline — only for day view */}
+      {dateMode === 'day' && (
+        <>
+          <SectionLabel>This Week</SectionLabel>
+          <View style={styles.weekCard}>
+            <View style={styles.weekBars}>
+              {weekDist.map((d, i) => {
+                const h = maxW > 0 ? (d / maxW) * 100 : 0;
+                const isToday = i === 6;
+                return (
+                  <View key={i} style={styles.weekBarCol}>
+                    <Text
+                      style={[
+                        styles.weekBarValue,
+                        { color: isToday ? T.accent : T.textDim },
+                        isToday && { fontWeight: '700' },
+                      ]}
+                    >
+                      {d.toFixed(1)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.weekBar,
+                        {
+                          height: `${h}%` as any,
+                          backgroundColor: isToday ? T.accent : T.muted,
+                        },
+                      ]}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.weekDays}>
+              {weekDays.map((d, i) => (
                 <Text
+                  key={i}
                   style={[
-                    styles.weekBarValue,
-                    { color: isToday ? T.accent : T.textDim },
-                    isToday && { fontWeight: '700' },
-                  ]}
-                >
-                  {d.toFixed(1)}
-                </Text>
-                <View
-                  style={[
-                    styles.weekBar,
+                    styles.weekDayLabel,
                     {
-                      height: `${h}%` as any,
-                      backgroundColor: isToday ? T.accent : T.muted,
+                      color: i === 6 ? T.accent : T.textDim,
+                      fontWeight: i === 6 ? '700' : '400',
                     },
                   ]}
-                />
-              </View>
-            );
-          })}
-        </View>
-        <View style={styles.weekDays}>
-          {weekDays.map((d, i) => (
-            <Text
-              key={i}
-              style={[
-                styles.weekDayLabel,
-                {
-                  color: i === 6 ? T.accent : T.textDim,
-                  fontWeight: i === 6 ? '700' : '400',
-                },
-              ]}
-            >
-              {d}
-            </Text>
-          ))}
-        </View>
-      </View>
+                >
+                  {d}
+                </Text>
+              ))}
+            </View>
+          </View>
+        </>
+      )}
 
       {/* Segment counts */}
       <SectionLabel>Segments</SectionLabel>
@@ -266,7 +279,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 64 : 16,
+    paddingTop: 16,
     marginBottom: 16,
   },
   headerTitle: {

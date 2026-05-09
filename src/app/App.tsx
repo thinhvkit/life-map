@@ -8,6 +8,7 @@ import MapScreen from '../screens/MapScreen';
 import TimelineScreen from '../screens/TimelineScreen';
 import StatsScreen from '../screens/StatsScreen';
 import { IconMap, IconTimeline, IconStats } from '../components/TabIcons';
+import DateHeader from '../components/DateHeader';
 import { trackingService } from '../services/tracking';
 import { useTrackingStore } from '../store/trackingStore';
 import { database } from '../services/database';
@@ -100,6 +101,7 @@ export default function App() {
   return (
     <NavigationContainer>
       <StatusBar barStyle="light-content" backgroundColor={T.bg} />
+      <DateHeader />
       <Tab.Navigator
         screenOptions={{
           headerShown: false,

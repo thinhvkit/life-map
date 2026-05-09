@@ -20,6 +20,7 @@ import {
   registerLocationHandler,
   registerGeofenceHandler,
 } from './backgroundTasks';
+import { gpsFilter } from './gpsFilter';
 
 class TrackingService {
   private isConfigured = false;
@@ -34,6 +35,12 @@ class TrackingService {
   private pendingConfig: ExpoLocationConfig | null = null;
   private lastLivePoint: { latitude: number; longitude: number } | null = null;
   private simActivity: ActivityType | null = null;
+  private lowSpeedSince: number | null = null;
+  private highSpeedSince: number | null = null;
+  private static readonly SPEED_STATIONARY_THRESHOLD = 0.5; // m/s
+  private static readonly SPEED_MOVING_THRESHOLD = 1.5; // m/s
+  private static readonly STOP_CONFIRM_MS = 90_000;  // 90s of low speed to confirm stop
+  private static readonly MOVE_CONFIRM_MS = 15_000;  // 15s of high speed to confirm move
 
   async configure(
     _settings: AppSettings = DEFAULT_SETTINGS,
@@ -142,6 +149,7 @@ class TrackingService {
     this.stopHeartbeat();
     motionDetector.stop();
     motionDetector.reset();
+    gpsFilter.reset();
 
     this.batteryLevelSub?.remove();
     this.batteryStateSub?.remove();
@@ -217,24 +225,67 @@ class TrackingService {
 
   private onLocation(location: Location.LocationObject): void {
     const point = this.locationToGpsPoint(location);
-    if (__DEV__) {
-      console.log(`[Location] ${point.latitude.toFixed(5)},${point.longitude.toFixed(5)} spd=${point.speed.toFixed(1)} acc=${point.accuracy.toFixed(0)}m`);
-    }
 
     if (this.simActivity) {
       point.activity = this.simActivity;
       point.confidence = 100;
-    } else if (motionDetector.isUsingNative()) {
-      const { activity, confidence } = motionDetector.getLastActivity();
-      point.activity = activity;
-      point.confidence = confidence;
     } else {
-      const speed = location.coords.speed ?? 0;
-      const accelVariance = motionDetector.getAccelVariance();
-      const { activity, confidence } = classifyFromSensors(speed, accelVariance);
-      point.activity = activity;
-      point.confidence = confidence;
-      powerManager.onActivityChange(activity, confidence);
+      const gpsSpeed = location.coords.speed ?? 0;
+
+      if (motionDetector.isUsingNative()) {
+        const { activity, confidence } = motionDetector.getLastActivity();
+        if (activity !== 'unknown' && confidence >= 50) {
+          point.activity = activity;
+          point.confidence = confidence;
+          // Speed sanity check: override if native and GPS speed disagree significantly
+          if (activity === 'walking' && gpsSpeed > 8) {
+            point.activity = classifyBySpeed(gpsSpeed);
+          } else if (activity === 'stationary' && gpsSpeed > 2) {
+            point.activity = classifyBySpeed(gpsSpeed);
+          }
+        } else {
+          // Native unknown or low confidence — fall back to speed-based
+          point.activity = classifyBySpeed(gpsSpeed);
+          point.confidence = 40;
+        }
+      } else {
+        const accelVariance = motionDetector.getAccelVariance();
+        const { activity, confidence } = classifyFromSensors(gpsSpeed, accelVariance);
+        point.activity = activity;
+        point.confidence = confidence;
+      }
+      powerManager.onActivityChange(point.activity, point.confidence);
+    }
+
+    gpsFilter.setActivity(point.activity);
+    const result = gpsFilter.process({
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy: point.accuracy,
+      timestamp: point.timestamp,
+    });
+
+    if (!result.accepted) {
+      if (__DEV__) {
+        console.log(`[GPS] rejected: ${result.reason} acc=${point.accuracy.toFixed(0)}m`);
+      }
+      // Still update position for UI even if rejected, but don't record
+      if (gpsFilter.getConsecutiveRejections() < 5) {
+        return;
+      }
+      // Too many rejections — accept raw to avoid data gaps
+      if (__DEV__) {
+        console.log('[GPS] fallback: accepting raw after 5 consecutive rejections');
+      }
+    }
+
+    if (result.accepted) {
+      point.latitude = result.latitude;
+      point.longitude = result.longitude;
+    }
+
+    if (__DEV__) {
+      console.log(`[Location] ${point.latitude.toFixed(5)},${point.longitude.toFixed(5)} spd=${point.speed.toFixed(1)} acc=${point.accuracy.toFixed(0)}m`);
     }
 
     useTrackingStore.getState().updatePosition(point);
@@ -255,6 +306,50 @@ class TrackingService {
         const live = { latitude: point.latitude, longitude: point.longitude };
         useTrackingStore.getState().appendLivePoint(live);
         this.lastLivePoint = live;
+      }
+    }
+
+    // Speed-based motion detection fallback (time-window confirmed)
+    // Catches stops that native activity recognition misses in background
+    const now = point.timestamp;
+    const speed = point.speed;
+
+    if (this.isMoving) {
+      if (speed < TrackingService.SPEED_STATIONARY_THRESHOLD) {
+        if (this.lowSpeedSince === null) this.lowSpeedSince = now;
+        this.highSpeedSince = null;
+        if (now - this.lowSpeedSince >= TrackingService.STOP_CONFIRM_MS) {
+          if (__DEV__) console.log(`[Tracking] speed-based stop confirmed (${((now - this.lowSpeedSince) / 1000).toFixed(0)}s low-speed)`);
+          this.lowSpeedSince = null;
+          this.onMotionChange(false);
+        }
+      } else {
+        this.lowSpeedSince = null;
+      }
+    } else {
+      if (speed > TrackingService.SPEED_MOVING_THRESHOLD) {
+        if (this.highSpeedSince === null) this.highSpeedSince = now;
+        this.lowSpeedSince = null;
+        if (now - this.highSpeedSince >= TrackingService.MOVE_CONFIRM_MS) {
+          if (__DEV__) console.log(`[Tracking] speed-based move confirmed (${((now - this.highSpeedSince) / 1000).toFixed(0)}s high-speed)`);
+          this.highSpeedSince = null;
+          this.onMotionChange(true);
+        }
+      } else if (this.currentPoints.length >= 3) {
+        this.highSpeedSince = null;
+        // Displacement check: if we've drifted >150m from segment start, we're moving
+        const first = this.currentPoints[0];
+        const displacement = haversineDistance(
+          first.latitude, first.longitude,
+          point.latitude, point.longitude,
+        );
+        if (displacement > 150) {
+          if (__DEV__) console.log(`[Tracking] displacement-based move detected (${displacement.toFixed(0)}m from start)`);
+          this.lowSpeedSince = null;
+          this.onMotionChange(true);
+        }
+      } else {
+        this.highSpeedSince = null;
       }
     }
   }
@@ -282,6 +377,8 @@ class TrackingService {
     this.currentPoints = [];
     this.segmentStartTime = Date.now();
     this.lastLivePoint = null;
+    this.lowSpeedSince = null;
+    this.highSpeedSince = null;
     useTrackingStore.getState().clearLivePoints();
   }
 
@@ -299,13 +396,17 @@ class TrackingService {
       );
     }
 
+    const points = segmentType === 'trip'
+      ? this.smoothPoints(this.currentPoints)
+      : [...this.currentPoints];
+
     const segment: Segment = {
       id: generateId(),
       type: segmentType,
       startTime: this.segmentStartTime,
       endTime: now,
       activity: this.getDominantActivity(),
-      points: [...this.currentPoints],
+      points,
     };
 
     if (segmentType === 'visit' && this.currentPoints.length > 0) {
@@ -317,6 +418,20 @@ class TrackingService {
       if (place) {
         segment.place = place;
         await placeGeofenceManager.ensureGeofence(place);
+      } else if (now - this.segmentStartTime >= 120_000) {
+        const centroid = this.currentPoints[Math.floor(this.currentPoints.length / 2)];
+        segment.place = {
+          id: generateId(),
+          name: 'Unknown Location',
+          latitude: centroid.latitude,
+          longitude: centroid.longitude,
+          radius: 50,
+          category: 'other',
+          visitCount: 1,
+          totalDuration: now - this.segmentStartTime,
+          firstVisit: this.segmentStartTime,
+          lastVisit: now,
+        };
       }
     }
 
@@ -346,13 +461,32 @@ class TrackingService {
 
   private getDominantActivity(): ActivityType {
     if (this.currentPoints.length === 0) return 'unknown';
+    if (this.currentPoints.length === 1) return this.currentPoints[0].activity;
 
-    const counts: Record<string, number> = {};
-    for (const p of this.currentPoints) {
-      counts[p.activity] = (counts[p.activity] || 0) + 1;
+    // Weight by time duration between consecutive points
+    const durations: Record<string, number> = {};
+    for (let i = 1; i < this.currentPoints.length; i++) {
+      const dt = this.currentPoints[i].timestamp - this.currentPoints[i - 1].timestamp;
+      const activity = this.currentPoints[i].activity;
+      durations[activity] = (durations[activity] || 0) + dt;
+    }
+    // Add first point's activity with the first interval
+    if (this.currentPoints.length >= 2) {
+      const dt0 = this.currentPoints[1].timestamp - this.currentPoints[0].timestamp;
+      const a0 = this.currentPoints[0].activity;
+      durations[a0] = (durations[a0] || 0) + dt0;
     }
 
-    return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
+    // Exclude 'unknown' and 'stationary' from trip segments if there's a real activity
+    const candidates = Object.entries(durations)
+      .filter(([a]) => a !== 'unknown' && a !== 'stationary')
+      .sort(([, a], [, b]) => b - a);
+
+    if (candidates.length > 0) {
+      return candidates[0][0] as ActivityType;
+    }
+
+    return (Object.entries(durations).sort(([, a], [, b]) => b - a)[0]?.[0] ||
       'unknown') as ActivityType;
   }
 
@@ -367,6 +501,40 @@ class TrackingService {
       );
     }
     return total;
+  }
+
+  private static readonly SMOOTH_ACCURACY_THRESHOLD = 10; // meters — only smooth points noisier than this
+
+  private smoothPoints(raw: GpsPoint[]): GpsPoint[] {
+    if (raw.length <= 2) return [...raw];
+
+    const result: GpsPoint[] = [{ ...raw[0] }];
+
+    for (let i = 1; i < raw.length - 1; i++) {
+      const curr = raw[i];
+
+      if (curr.accuracy <= TrackingService.SMOOTH_ACCURACY_THRESHOLD) {
+        result.push({ ...curr });
+        continue;
+      }
+
+      const prev = raw[i - 1];
+      const next = raw[i + 1];
+
+      const wPrev = 1 / Math.max(prev.accuracy, 1);
+      const wCurr = 2 / Math.max(curr.accuracy, 1);
+      const wNext = 1 / Math.max(next.accuracy, 1);
+      const wTotal = wPrev + wCurr + wNext;
+
+      result.push({
+        ...curr,
+        latitude: (prev.latitude * wPrev + curr.latitude * wCurr + next.latitude * wNext) / wTotal,
+        longitude: (prev.longitude * wPrev + curr.longitude * wCurr + next.longitude * wNext) / wTotal,
+      });
+    }
+
+    result.push({ ...raw[raw.length - 1] });
+    return result;
   }
 
   private startHeartbeat(): void {

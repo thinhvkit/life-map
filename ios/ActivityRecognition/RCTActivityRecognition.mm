@@ -30,12 +30,15 @@ RCT_EXPORT_MODULE(ActivityRecognition)
 - (void)startActivityUpdates:(double)intervalMs
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject {
+  NSLog(@"[ActivityRecognition] startActivityUpdates called, intervalMs=%.0f", intervalMs);
   if (![CMMotionActivityManager isActivityAvailable]) {
+    NSLog(@"[ActivityRecognition] activity not available on this device");
     reject(@"UNAVAILABLE", @"Activity recognition is not available on this device", nil);
     return;
   }
 
   if (_isRunning) {
+    NSLog(@"[ActivityRecognition] already running, skipping");
     resolve(nil);
     return;
   }
@@ -64,6 +67,7 @@ RCT_EXPORT_MODULE(ActivityRecognition)
       }
     };
 
+    NSLog(@"[ActivityRecognition] activity=%@ confidence=%ld", activityType, (long)confidence);
     [strongSelf emitOnActivityChange:event];
   }];
 
@@ -133,7 +137,9 @@ RCT_EXPORT_MODULE(ActivityRecognition)
 
 - (void)isAvailable:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject {
+  NSLog(@"[ActivityRecognition] isAvailable called");
   if (![CMMotionActivityManager isActivityAvailable]) {
+    NSLog(@"[ActivityRecognition] isAvailable: NO (not available on device)");
     resolve(@NO);
     return;
   }

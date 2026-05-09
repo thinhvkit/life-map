@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
+import React, { useRef, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Animated,
   Platform,
   Alert,
@@ -37,7 +38,8 @@ export default function MapScreen() {
     todayLog.segments
       .filter(s => s.type === 'visit' && s.place)
       .forEach(s => {
-        if (!seen.has(s.place!.name)) seen.set(s.place!.name, s);
+        const key = s.place!.id;
+        if (!seen.has(key)) seen.set(key, s);
       });
     return [...seen.values()];
   }, [todayLog]);
@@ -83,6 +85,8 @@ export default function MapScreen() {
       Alert.alert('Tracking Error', msg);
     }
   }, [isTracking]);
+
+  const [showSimPanel, setShowSimPanel] = useState(false);
 
   const handleCenterOnUser = useCallback(async () => {
     try {
@@ -242,15 +246,47 @@ export default function MapScreen() {
         />
       )}
 
+      {/* Simulation panel */}
+      {showSimPanel && (
+        <View style={styles.simPanel}>
+          {[
+            { label: 'Walk', action: () => trackingService.simulateRoute(
+              [[10.7731, 106.7030], [10.7735, 106.6995], [10.7750, 106.6975], [10.7770, 106.6950]],
+              30000, 'walking',
+            )},
+            { label: 'Cycle', action: () => trackingService.simulateRoute(
+              [[10.7735, 106.6995], [10.7770, 106.6950], [10.7800, 106.6920], [10.7845, 106.6870]],
+              20000, 'cycling',
+            )},
+            { label: 'Drive', action: () => trackingService.simulateRoute(
+              [[10.7845, 106.6870], [10.7810, 106.6930], [10.7770, 106.6985], [10.7731, 106.7030]],
+              15000, 'driving',
+            )},
+            { label: 'Stay', action: () => trackingService.simulateStay([10.7731, 106.7030], 150000) },
+            { label: 'Stop', action: () => trackingService.stopSimulation() },
+          ].map(s => (
+            <TouchableOpacity
+              key={s.label}
+              style={styles.simBtn}
+              onPress={() => { s.action(); setShowSimPanel(false); }}
+            >
+              <Text style={styles.simBtnText}>{s.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* FABs */}
       <View style={styles.fabContainer}>
         {__DEV__ && (
-          <TouchableOpacity
+          <Pressable
             style={[styles.fabSmall, { backgroundColor: '#7C3AED' }]}
-            onPress={() => (global as any).sim?.walk()}
+            onLongPress={() => setShowSimPanel(v => !v)}
+            delayLongPress={800}
+            onPress={() => showSimPanel && setShowSimPanel(false)}
           >
             <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>SIM</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
         <TouchableOpacity style={styles.fabSmall} onPress={handleCenterOnUser}>
           <CrosshairIcon />
@@ -549,6 +585,31 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 13,
     letterSpacing: 0.2,
+  },
+
+  // Simulation panel
+  simPanel: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 130 : 120,
+    right: 12,
+    backgroundColor: 'rgba(8,14,28,0.95)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 6,
+    gap: 4,
+  },
+  simBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: T.surface,
+  },
+  simBtnText: {
+    color: T.text,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 
   // Crosshair icon

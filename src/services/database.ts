@@ -321,6 +321,32 @@ class Database {
     };
   }
 
+  async getDayLogsInRange(startDate: string, endDate: string): Promise<DayLog[]> {
+    const db = this.getDb();
+    const logResult = await db.execute(
+      'SELECT * FROM day_logs WHERE date >= ? AND date <= ? ORDER BY date',
+      [startDate, endDate],
+    );
+
+    const logs: DayLog[] = [];
+    for (const row of logResult.rows) {
+      const date = row.date as string;
+      const segments = await this.getSegmentsByDate(date);
+      logs.push({
+        date,
+        segments,
+        totalDistance: row.total_distance as number,
+        totalMovingTime: row.total_moving_time as number,
+        totalStationaryTime: row.total_stationary_time as number,
+        placesVisited: row.places_visited as number,
+        activityBreakdown: JSON.parse(
+          (row.activity_breakdown as string) || '{}',
+        ),
+      });
+    }
+    return logs;
+  }
+
   // ── Geofenced Places ──
 
   async addGeofencedPlace(placeId: string): Promise<void> {

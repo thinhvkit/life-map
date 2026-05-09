@@ -80,3 +80,4 @@
   points
   - Indexed queries — loading a specific day's segments is O(log n) not O(n)
   - Place lookups by ID are direct primary key hits
+
