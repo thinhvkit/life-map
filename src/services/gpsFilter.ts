@@ -42,11 +42,84 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// 1-degree latitude ≈ 111,320 meters
+const DEG_TO_M = 111_320;
+
+class KalmanAxis {
+  private x = 0;   // position estimate (degrees)
+  private v = 0;   // velocity estimate (degrees/s)
+  private p00 = 1; // covariance: position variance
+  private p01 = 0; // covariance: position-velocity
+  private p10 = 0;
+  private p11 = 1; // covariance: velocity variance
+  private initialized = false;
+
+  reset(): void {
+    this.initialized = false;
+    this.x = 0;
+    this.v = 0;
+    this.p00 = 1;
+    this.p01 = 0;
+    this.p10 = 0;
+    this.p11 = 1;
+  }
+
+  update(measurement: number, accuracyM: number, dtSec: number): number {
+    if (!this.initialized) {
+      this.x = measurement;
+      this.v = 0;
+      const accDeg = accuracyM / DEG_TO_M;
+      this.p00 = accDeg * accDeg;
+      this.p01 = 0;
+      this.p10 = 0;
+      this.p11 = 1e-8;
+      this.initialized = true;
+      return this.x;
+    }
+
+    // Process noise scales with dt — faster movement = more uncertainty
+    const qPos = (3 / DEG_TO_M) ** 2 * dtSec;  // ~3 m/s walking noise
+    const qVel = (1 / DEG_TO_M) ** 2 * dtSec;
+
+    // Predict
+    this.x += this.v * dtSec;
+    this.p00 += dtSec * (this.p10 + this.p01) + dtSec * dtSec * this.p11 + qPos;
+    this.p01 += dtSec * this.p11;
+    this.p10 += dtSec * this.p11;
+    this.p11 += qVel;
+
+    // Measurement noise from GPS accuracy
+    const rDeg = accuracyM / DEG_TO_M;
+    const r = rDeg * rDeg;
+
+    // Kalman gain
+    const s = this.p00 + r;
+    const k0 = this.p00 / s;
+    const k1 = this.p10 / s;
+
+    // Update
+    const innovation = measurement - this.x;
+    this.x += k0 * innovation;
+    this.v += k1 * innovation;
+
+    const p00New = (1 - k0) * this.p00;
+    const p01New = (1 - k0) * this.p01;
+    this.p10 = -k1 * this.p00 + this.p10;
+    this.p11 = -k1 * this.p01 + this.p11;
+    this.p00 = p00New;
+    this.p01 = p01New;
+
+    return this.x;
+  }
+}
+
 class GPSFilter {
   private lastAccepted: RawPoint | null = null;
   private config: FilterConfig = ACTIVITY_CONFIGS.unknown;
   private currentActivity: ActivityType = 'unknown';
   private rejectedCount = 0;
+  private kalmanLat = new KalmanAxis();
+  private kalmanLon = new KalmanAxis();
 
   setActivity(activity: ActivityType): void {
     if (activity === this.currentActivity) return;
@@ -55,7 +128,7 @@ class GPSFilter {
   }
 
   process(point: RawPoint): FilterResult {
-    // 1. Accuracy gate — reject very inaccurate readings
+    // 1. Accuracy gate
     if (point.accuracy > this.config.maxAccuracy) {
       this.rejectedCount++;
       return { accepted: false, reason: 'accuracy', ...point };
@@ -64,12 +137,12 @@ class GPSFilter {
     if (this.lastAccepted) {
       const dt = point.timestamp - this.lastAccepted.timestamp;
 
-      // 2. Time delta gate — skip too-frequent updates
+      // 2. Time delta gate
       if (dt < this.config.minTimeDelta) {
         return { accepted: false, reason: 'too_frequent', ...point };
       }
 
-      // 3. Speed gate — reject teleport spikes
+      // 3. Speed gate — reject teleport spikes (use raw coords for spike detection)
       if (dt > 0) {
         const dist = haversine(
           this.lastAccepted.latitude, this.lastAccepted.longitude,
@@ -83,14 +156,21 @@ class GPSFilter {
       }
     }
 
-    // Accept raw coordinates — no Kalman smoothing
+    // Kalman-smooth accepted coordinates
+    const dtSec = this.lastAccepted
+      ? Math.max((point.timestamp - this.lastAccepted.timestamp) / 1000, 0.1)
+      : 0;
+
+    const smoothLat = this.kalmanLat.update(point.latitude, point.accuracy, dtSec);
+    const smoothLon = this.kalmanLon.update(point.longitude, point.accuracy, dtSec);
+
     this.lastAccepted = point;
     this.rejectedCount = 0;
 
     return {
       accepted: true,
-      latitude: point.latitude,
-      longitude: point.longitude,
+      latitude: smoothLat,
+      longitude: smoothLon,
       accuracy: point.accuracy,
       timestamp: point.timestamp,
     };
@@ -99,6 +179,8 @@ class GPSFilter {
   reset(): void {
     this.lastAccepted = null;
     this.rejectedCount = 0;
+    this.kalmanLat.reset();
+    this.kalmanLon.reset();
   }
 
   getConsecutiveRejections(): number {

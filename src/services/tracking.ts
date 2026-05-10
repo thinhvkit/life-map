@@ -21,12 +21,15 @@ import {
   registerGeofenceHandler,
 } from './backgroundTasks';
 import { gpsFilter } from './gpsFilter';
+import { database } from './database';
+import { format } from 'date-fns';
 
 class TrackingService {
   private isConfigured = false;
   private currentPoints: GpsPoint[] = [];
   private segmentStartTime: number = Date.now();
   private isMoving: boolean = false;
+  private pendingPointIndex: number = 0;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private batteryLevel = 1;
   private isCharging = false;
@@ -112,6 +115,7 @@ class TrackingService {
       powerManager.onGeofenceExit();
     });
 
+    this.recoverPendingSegment();
     this.isConfigured = true;
   }
 
@@ -155,6 +159,8 @@ class TrackingService {
     this.batteryStateSub?.remove();
     this.batteryLevelSub = null;
     this.batteryStateSub = null;
+
+    try { database.clearPending(); } catch {}
 
     useTrackingStore.getState().clearLivePoints();
     useTrackingStore.getState().setTracking(false);
@@ -291,6 +297,7 @@ class TrackingService {
     useTrackingStore.getState().updatePosition(point);
     useTrackingStore.getState().updateCurrentActivity(point.activity);
     this.currentPoints.push(point);
+    this.persistPoint(point);
 
     if (this.isMoving) {
       const last = this.lastLivePoint;
@@ -375,11 +382,22 @@ class TrackingService {
 
   private startNewSegment(): void {
     this.currentPoints = [];
+    this.pendingPointIndex = 0;
     this.segmentStartTime = Date.now();
     this.lastLivePoint = null;
     this.lowSpeedSince = null;
     this.highSpeedSince = null;
     useTrackingStore.getState().clearLivePoints();
+
+    try {
+      database.savePendingSegment(
+        this.segmentStartTime,
+        this.isMoving,
+        format(new Date(), 'yyyy-MM-dd'),
+      );
+    } catch (e) {
+      console.warn('[Tracking] Failed to persist pending segment:', e);
+    }
   }
 
   private async finalizeCurrentSegment(): Promise<void> {
@@ -396,9 +414,7 @@ class TrackingService {
       );
     }
 
-    const points = segmentType === 'trip'
-      ? this.smoothPoints(this.currentPoints)
-      : [...this.currentPoints];
+    const points = [...this.currentPoints];
 
     const segment: Segment = {
       id: generateId(),
@@ -440,6 +456,12 @@ class TrackingService {
     }
 
     useTrackingStore.getState().addSegment(segment);
+
+    try {
+      database.clearPending();
+    } catch (e) {
+      console.warn('[Tracking] Failed to clear pending data:', e);
+    }
   }
 
   private locationToGpsPoint(location: Location.LocationObject): GpsPoint {
@@ -503,38 +525,40 @@ class TrackingService {
     return total;
   }
 
-  private static readonly SMOOTH_ACCURACY_THRESHOLD = 10; // meters — only smooth points noisier than this
-
-  private smoothPoints(raw: GpsPoint[]): GpsPoint[] {
-    if (raw.length <= 2) return [...raw];
-
-    const result: GpsPoint[] = [{ ...raw[0] }];
-
-    for (let i = 1; i < raw.length - 1; i++) {
-      const curr = raw[i];
-
-      if (curr.accuracy <= TrackingService.SMOOTH_ACCURACY_THRESHOLD) {
-        result.push({ ...curr });
-        continue;
-      }
-
-      const prev = raw[i - 1];
-      const next = raw[i + 1];
-
-      const wPrev = 1 / Math.max(prev.accuracy, 1);
-      const wCurr = 2 / Math.max(curr.accuracy, 1);
-      const wNext = 1 / Math.max(next.accuracy, 1);
-      const wTotal = wPrev + wCurr + wNext;
-
-      result.push({
-        ...curr,
-        latitude: (prev.latitude * wPrev + curr.latitude * wCurr + next.latitude * wNext) / wTotal,
-        longitude: (prev.longitude * wPrev + curr.longitude * wCurr + next.longitude * wNext) / wTotal,
-      });
+  private persistPoint(point: GpsPoint): void {
+    try {
+      database.appendPendingPoint(point, this.pendingPointIndex++);
+    } catch (e) {
+      console.warn('[Tracking] Failed to persist point:', e);
     }
+  }
 
-    result.push({ ...raw[raw.length - 1] });
-    return result;
+  private recoverPendingSegment(): void {
+    try {
+      const pending = database.loadPendingSegment();
+      if (!pending || pending.points.length === 0) return;
+
+      console.log(
+        `[Tracking] Recovering pending segment: ${pending.points.length} points, moving=${pending.isMoving}`,
+      );
+
+      this.currentPoints = pending.points;
+      this.pendingPointIndex = pending.points.length;
+      this.segmentStartTime = pending.startTime;
+      this.isMoving = pending.isMoving;
+
+      if (this.isMoving) {
+        const store = useTrackingStore.getState();
+        store.clearLivePoints();
+        for (const p of pending.points) {
+          store.appendLivePoint({ latitude: p.latitude, longitude: p.longitude });
+        }
+        const last = pending.points[pending.points.length - 1];
+        this.lastLivePoint = { latitude: last.latitude, longitude: last.longitude };
+      }
+    } catch (e) {
+      console.warn('[Tracking] Failed to recover pending segment:', e);
+    }
   }
 
   private startHeartbeat(): void {

@@ -14,6 +14,7 @@ import { useTrackingStore } from '../store/trackingStore';
 import { trackingService } from '../services/tracking';
 import { T, ACTIVITY_COLORS, PLACE_COLORS, PLACE_ICONS } from '../utils/theme';
 import { formatDistance, formatDuration, formatTime } from '../utils/geo';
+import { catmullRomSpline } from '../utils/catmullRom';
 import { Segment } from '../models/types';
 
 const HCMC_CENTER: [number, number] = [106.700, 10.777];
@@ -46,12 +47,15 @@ export default function MapScreen() {
 
   const liveShape = useMemo(() => {
     if (livePoints.length < 2) return null;
+    const coords = livePoints.length >= 3
+      ? catmullRomSpline(livePoints, 8)
+      : livePoints.map(p => [p.longitude, p.latitude]);
     return {
       type: 'Feature' as const,
       properties: {},
       geometry: {
         type: 'LineString' as const,
-        coordinates: livePoints.map(p => [p.longitude, p.latitude]),
+        coordinates: coords,
       },
     };
   }, [livePoints]);
@@ -125,10 +129,10 @@ export default function MapScreen() {
 
         {/* Route polylines */}
         {trips.map(trip => {
-          const coords = (trip.simplifiedPoints || trip.points).map(p => [
-            p.longitude,
-            p.latitude,
-          ]);
+          const raw = trip.simplifiedPoints || trip.points;
+          const coords = raw.length >= 3
+            ? catmullRomSpline(raw, 8)
+            : raw.map(p => [p.longitude, p.latitude]);
           if (coords.length < 2) return null;
           const color = ACTIVITY_COLORS[trip.activity];
 

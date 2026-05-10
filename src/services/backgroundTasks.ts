@@ -11,10 +11,17 @@ let onGeofenceCallback:
   | ((eventType: Location.GeofencingEventType, region: Location.LocationRegion) => void)
   | null = null;
 
+let locationBuffer: Location.LocationObject[] = [];
+
 export function registerLocationHandler(
   cb: (locations: Location.LocationObject[]) => void,
 ): void {
   onLocationCallback = cb;
+  if (locationBuffer.length > 0) {
+    console.log(`[BGTask] Flushing ${locationBuffer.length} buffered locations`);
+    cb(locationBuffer);
+    locationBuffer = [];
+  }
 }
 
 export function registerGeofenceHandler(
@@ -30,7 +37,11 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   }
   if (data) {
     const { locations } = data as { locations: Location.LocationObject[] };
-    onLocationCallback?.(locations);
+    if (onLocationCallback) {
+      onLocationCallback(locations);
+    } else {
+      locationBuffer.push(...locations);
+    }
   }
 });
 

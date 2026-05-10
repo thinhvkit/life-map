@@ -8,7 +8,7 @@ import {
 } from '../models/types';
 
 const DB_NAME = 'lifemap.db';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 class Database {
   private db: DB | null = null;
@@ -112,6 +112,38 @@ class Database {
 
       db.executeSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       console.log(`[DB] Migrated to schema v${SCHEMA_VERSION}`);
+    }
+
+    if (currentVersion < 2) {
+      db.executeSync(`
+        CREATE TABLE IF NOT EXISTS pending_segment (
+          id TEXT PRIMARY KEY DEFAULT 'current',
+          start_time INTEGER NOT NULL,
+          is_moving INTEGER NOT NULL DEFAULT 0,
+          date_key TEXT NOT NULL
+        )
+      `);
+
+      db.executeSync(`
+        CREATE TABLE IF NOT EXISTS pending_points (
+          id TEXT PRIMARY KEY,
+          latitude REAL NOT NULL,
+          longitude REAL NOT NULL,
+          altitude REAL DEFAULT 0,
+          accuracy REAL DEFAULT 0,
+          speed REAL DEFAULT 0,
+          heading REAL DEFAULT 0,
+          timestamp INTEGER NOT NULL,
+          battery_level REAL,
+          is_moving INTEGER DEFAULT 0,
+          activity TEXT DEFAULT 'unknown',
+          confidence INTEGER DEFAULT 0,
+          sort_order INTEGER NOT NULL
+        )
+      `);
+
+      db.executeSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      console.log('[DB] Migrated to schema v2 (pending segment tables)');
     }
   }
 
@@ -361,6 +393,65 @@ class Database {
     const db = this.getDb();
     const result = await db.execute('SELECT place_id FROM geofenced_places');
     return result.rows.map(r => r.place_id as string);
+  }
+
+  // ── Pending (in-progress) segment ──
+
+  savePendingSegment(startTime: number, isMoving: boolean, dateKey: string): void {
+    const db = this.getDb();
+    db.executeSync(
+      `INSERT OR REPLACE INTO pending_segment (id, start_time, is_moving, date_key)
+       VALUES ('current', ?, ?, ?)`,
+      [startTime, isMoving ? 1 : 0, dateKey],
+    );
+  }
+
+  appendPendingPoint(point: GpsPoint, sortOrder: number): void {
+    const db = this.getDb();
+    db.executeSync(
+      `INSERT OR REPLACE INTO pending_points
+       (id, latitude, longitude, altitude, accuracy, speed, heading, timestamp, battery_level, is_moving, activity, confidence, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        point.id,
+        point.latitude,
+        point.longitude,
+        point.altitude,
+        point.accuracy,
+        point.speed,
+        point.heading,
+        point.timestamp,
+        point.batteryLevel ?? null,
+        point.isMoving ? 1 : 0,
+        point.activity,
+        point.confidence,
+        sortOrder,
+      ],
+    );
+  }
+
+  loadPendingSegment(): { startTime: number; isMoving: boolean; dateKey: string; points: GpsPoint[] } | null {
+    const db = this.getDb();
+    const segResult = db.executeSync('SELECT * FROM pending_segment WHERE id = ?', ['current']);
+    if (segResult.rows.length === 0) return null;
+
+    const row = segResult.rows[0];
+    const pointsResult = db.executeSync(
+      'SELECT * FROM pending_points ORDER BY sort_order',
+    );
+
+    return {
+      startTime: row.start_time as number,
+      isMoving: (row.is_moving as number) === 1,
+      dateKey: row.date_key as string,
+      points: pointsResult.rows.map(rowToGpsPoint),
+    };
+  }
+
+  clearPending(): void {
+    const db = this.getDb();
+    db.executeSync('DELETE FROM pending_segment');
+    db.executeSync('DELETE FROM pending_points');
   }
 
   // ── Dev: clear all data for a date ──
