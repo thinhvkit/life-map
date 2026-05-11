@@ -30,18 +30,13 @@ export function catmullRomSpline(
     const p3 = extended[i + 2];
 
     const isFirst = i === 1;
-    const isLast = i === extended.length - 3;
     const steps = pointsPerSegment;
+    const startS = isFirst ? 0 : 1;
 
-    for (let s = 0; s < steps; s++) {
-      if (s === 0 && !isFirst) continue;
+    for (let s = startS; s <= steps; s++) {
       const t = s / steps;
       const pt = centripetal(p0, p1, p2, p3, t, alpha);
       result.push(pt);
-    }
-
-    if (isLast) {
-      result.push([p2.longitude, p2.latitude]);
     }
   }
 
