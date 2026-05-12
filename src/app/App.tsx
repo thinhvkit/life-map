@@ -10,7 +10,7 @@ import StatsScreen from '../screens/StatsScreen';
 import { IconMap, IconTimeline, IconStats } from '../components/TabIcons';
 import DateHeader from '../components/DateHeader';
 import { trackingService } from '../services/tracking';
-import { useTrackingStore } from '../store/trackingStore';
+import { useTrackingStore, getLiveBuffer } from '../store/trackingStore';
 import { database } from '../services/database';
 import { generateMockDayLog } from '../services/mockData';
 import { MAPBOX_ACCESS_TOKEN } from '../config.local';
@@ -73,10 +73,11 @@ export default function App() {
             const store = useTrackingStore.getState();
             const next = { ...store.dayLogs };
             delete next[today];
+            getLiveBuffer().length = 0;
             useTrackingStore.setState({
               dayLogs: next,
               todayLog: null,
-              livePoints: [],
+              liveVersion: 0,
             });
             await store.loadDayLog(today);
             console.log(`[Sim] Cleared today (${n} segments)`);
@@ -106,20 +107,19 @@ export default function App() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: T.surface,
-            borderTopColor: T.border,
-            borderTopWidth: 1,
-            paddingBottom: 20,
+            backgroundColor: '#060D1C',
+            borderTopWidth: 0,
+            paddingBottom: 14,
             paddingTop: 10,
-            height: 70,
+            height: 92,
           },
-          tabBarActiveTintColor: T.accent,
-          tabBarInactiveTintColor: T.textDim,
+          tabBarActiveTintColor: '#E8EFF8',
+          tabBarInactiveTintColor: '#3D5470',
           tabBarLabelStyle: {
             fontSize: 10,
-            fontWeight: '600',
-            letterSpacing: 0.3,
-            marginTop: 4,
+            fontWeight: '700',
+            letterSpacing: 0.4,
+            marginTop: 2,
           },
         }}
       >
@@ -129,14 +129,7 @@ export default function App() {
           options={{
             tabBarLabel: 'Map',
             tabBarIcon: ({ color, focused }) => (
-              <View style={styles.tabIconWrap}>
-                <IconMap color={color} active={focused} />
-                {focused && (
-                  <View
-                    style={[styles.activeDot, { backgroundColor: T.accent }]}
-                  />
-                )}
-              </View>
+              <IconMap color={color} active={focused} />
             ),
           }}
         />
@@ -146,14 +139,7 @@ export default function App() {
           options={{
             tabBarLabel: 'Timeline',
             tabBarIcon: ({ color, focused }) => (
-              <View style={styles.tabIconWrap}>
-                <IconTimeline color={color} active={focused} />
-                {focused && (
-                  <View
-                    style={[styles.activeDot, { backgroundColor: T.accent }]}
-                  />
-                )}
-              </View>
+              <IconTimeline color={color} active={focused} />
             ),
           }}
         />
@@ -163,14 +149,7 @@ export default function App() {
           options={{
             tabBarLabel: 'Stats',
             tabBarIcon: ({ color, focused }) => (
-              <View style={styles.tabIconWrap}>
-                <IconStats color={color} active={focused} />
-                {focused && (
-                  <View
-                    style={[styles.activeDot, { backgroundColor: T.accent }]}
-                  />
-                )}
-              </View>
+              <IconStats color={color} active={focused} />
             ),
           }}
         />
@@ -183,14 +162,5 @@ const styles = StyleSheet.create({
   splash: {
     flex: 1,
     backgroundColor: T.bg,
-  },
-  tabIconWrap: {
-    alignItems: 'center',
-  },
-  activeDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginTop: 2,
   },
 });

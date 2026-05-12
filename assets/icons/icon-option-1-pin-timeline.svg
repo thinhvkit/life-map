@@ -8,10 +8,6 @@
       <stop offset="0%" stop-color="#60A5FA"/>
       <stop offset="100%" stop-color="#3B82F6"/>
     </linearGradient>
-    <linearGradient id="glowGrad" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#93C5FD" stop-opacity="0.4"/>
-      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
-    </linearGradient>
   </defs>
 
   <!-- Background -->
@@ -19,42 +15,48 @@
 
   <!-- Subtle grid lines (map feel) -->
   <g opacity="0.06" stroke="#60A5FA" stroke-width="1.5">
-    <line x1="256" y1="100" x2="256" y2="924"/>
-    <line x1="512" y1="100" x2="512" y2="924"/>
-    <line x1="768" y1="100" x2="768" y2="924"/>
-    <line x1="100" y1="256" x2="924" y2="256"/>
-    <line x1="100" y1="512" x2="924" y2="512"/>
-    <line x1="100" y1="768" x2="924" y2="768"/>
+    <line x1="256" y1="80" x2="256" y2="944"/>
+    <line x1="512" y1="80" x2="512" y2="944"/>
+    <line x1="768" y1="80" x2="768" y2="944"/>
+    <line x1="80" y1="256" x2="944" y2="256"/>
+    <line x1="80" y1="512" x2="944" y2="512"/>
+    <line x1="80" y1="768" x2="944" y2="768"/>
   </g>
 
   <!-- Timeline vertical line -->
-  <line x1="380" y1="260" x2="380" y2="780" stroke="#1E3A5F" stroke-width="6" stroke-linecap="round"/>
+  <line x1="210" y1="160" x2="210" y2="880" stroke="#1E3A5F" stroke-width="8" stroke-linecap="round"/>
 
-  <!-- Timeline dots -->
-  <circle cx="380" cy="320" r="10" fill="#2563EB" opacity="0.5"/>
-  <circle cx="380" cy="440" r="10" fill="#3B82F6" opacity="0.6"/>
-  <circle cx="380" cy="560" r="10" fill="#60A5FA" opacity="0.7"/>
-  <circle cx="380" cy="680" r="12" fill="#93C5FD" opacity="0.9"/>
+  <!-- Timeline dots (bigger) -->
+  <circle cx="210" cy="240" r="16" fill="#2563EB" opacity="0.55"/>
+  <circle cx="210" cy="390" r="16" fill="#3B82F6" opacity="0.65"/>
+  <circle cx="210" cy="540" r="16" fill="#60A5FA" opacity="0.75"/>
+  <circle cx="210" cy="690" r="18" fill="#93C5FD" opacity="0.95"/>
 
   <!-- Timeline horizontal ticks -->
-  <line x1="380" y1="320" x2="440" y2="320" stroke="#2563EB" stroke-width="3" opacity="0.5"/>
-  <line x1="380" y1="440" x2="460" y2="440" stroke="#3B82F6" stroke-width="3" opacity="0.6"/>
-  <line x1="380" y1="560" x2="480" y2="560" stroke="#60A5FA" stroke-width="3" opacity="0.7"/>
+  <line x1="210" y1="240" x2="300" y2="240" stroke="#2563EB" stroke-width="4" opacity="0.55"/>
+  <line x1="210" y1="390" x2="320" y2="390" stroke="#3B82F6" stroke-width="4" opacity="0.65"/>
+  <line x1="210" y1="540" x2="340" y2="540" stroke="#60A5FA" stroke-width="4" opacity="0.75"/>
 
-  <!-- Map Pin -->
-  <g transform="translate(580, 340)">
-    <!-- Pin glow -->
-    <ellipse cx="0" cy="260" rx="80" ry="20" fill="#3B82F6" opacity="0.15"/>
+  <!-- Map Pin — centered right, significantly larger -->
+  <g transform="translate(590, 460)">
+    <!-- Pin shadow glow -->
+    <ellipse cx="0" cy="330" rx="140" ry="30" fill="#3B82F6" opacity="0.18"/>
 
     <!-- Pin body -->
-    <path d="M0,-160 C-88,-160 -140,-100 -140,-40 C-140,50 0,200 0,200 C0,200 140,50 140,-40 C140,-100 88,-160 0,-160 Z"
-          fill="url(#pinGrad)" stroke="#93C5FD" stroke-width="4"/>
+    <path d="M0,-240 C-148,-240 -220,-156 -220,-72
+             C-220,72 0,330 0,330
+             C0,330 220,72 220,-72
+             C220,-156 148,-240 0,-240 Z"
+          fill="url(#pinGrad)" stroke="#93C5FD" stroke-width="6"/>
 
     <!-- Pin inner circle -->
-    <circle cx="0" cy="-50" r="52" fill="#0A1628" stroke="#93C5FD" stroke-width="3"/>
+    <circle cx="0" cy="-80" r="88" fill="#0A1628" stroke="#93C5FD" stroke-width="5"/>
 
-    <!-- Pulsing dot inside pin -->
-    <circle cx="0" cy="-50" r="22" fill="#60A5FA"/>
-    <circle cx="0" cy="-50" r="12" fill="#93C5FD"/>
+    <!-- Pulsing rings -->
+    <circle cx="0" cy="-80" r="56" fill="none" stroke="#3B82F6" stroke-width="2" opacity="0.3"/>
+
+    <!-- Core dot -->
+    <circle cx="0" cy="-80" r="38" fill="#60A5FA"/>
+    <circle cx="0" cy="-80" r="20" fill="#93C5FD"/>
   </g>
 </svg>

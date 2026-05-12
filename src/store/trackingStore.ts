@@ -19,9 +19,16 @@ import { database } from '../services/database';
 
 export type DateMode = 'day' | 'month' | 'year';
 
-interface LivePoint {
+export interface LivePoint {
   latitude: number;
   longitude: number;
+}
+
+let liveBuffer: LivePoint[] = [];
+const LIVE_RENDER_INTERVAL = 3;
+
+export function getLiveBuffer(): LivePoint[] {
+  return liveBuffer;
 }
 
 interface TrackingStore extends TrackingState {
@@ -36,7 +43,7 @@ interface TrackingStore extends TrackingState {
   setPowerProfile: (profile: PowerProfile) => void;
   setCharging: (isCharging: boolean) => void;
   dayLogs: Record<string, DayLog>;
-  livePoints: LivePoint[];
+  liveVersion: number;
   appendLivePoint: (point: LivePoint) => void;
   clearLivePoints: () => void;
 }
@@ -54,12 +61,19 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
   currentPowerProfile: 'balanced',
   isCharging: false,
   dayLogs: {},
-  livePoints: [],
+  liveVersion: 0,
 
-  appendLivePoint: point =>
-    set(state => ({ livePoints: [...state.livePoints, point] })),
+  appendLivePoint: point => {
+    liveBuffer.push(point);
+    if (liveBuffer.length % LIVE_RENDER_INTERVAL === 0) {
+      set({ liveVersion: liveBuffer.length });
+    }
+  },
 
-  clearLivePoints: () => set({ livePoints: [] }),
+  clearLivePoints: () => {
+    liveBuffer = [];
+    set({ liveVersion: 0 });
+  },
 
   setTracking: isTracking => set({ isTracking }),
   setPowerProfile: profile => set({ currentPowerProfile: profile }),
@@ -85,7 +99,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
     const prevDayLogs = get().dayLogs;
     const prevLog = prevDayLogs[dateKey] ?? createEmptyDayLog(dateKey);
 
-    if (segment.type === 'trip' && segment.points.length > 2) {
+    if (segment.type === 'trip' && !segment.simplifiedPoints && segment.points.length > 2) {
       segment.simplifiedPoints = simplifyRoute(
         segment.points.map(p => ({
           latitude: p.latitude,
@@ -118,9 +132,13 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
 
     const nextDayLogs = { ...prevDayLogs, [dateKey]: nextLog };
 
+    if (segment.type === 'trip') {
+      liveBuffer = [];
+    }
+
     const updates: Partial<TrackingStore> = {
       dayLogs: nextDayLogs,
-      ...(segment.type === 'trip' ? { livePoints: [] } : {}),
+      ...(segment.type === 'trip' ? { liveVersion: 0 } : {}),
     };
 
     // Update todayLog if we're viewing this day or a range that includes it

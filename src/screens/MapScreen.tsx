@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
-import { useTrackingStore } from '../store/trackingStore';
+import { useTrackingStore, getLiveBuffer } from '../store/trackingStore';
 import { trackingService } from '../services/tracking';
 import { T, ACTIVITY_COLORS, PLACE_COLORS, PLACE_ICONS } from '../utils/theme';
 import { formatDistance, formatDuration, formatTime } from '../utils/geo';
@@ -26,7 +26,7 @@ export default function MapScreen() {
   const isTracking = useTrackingStore(s => s.isTracking);
   const currentPosition = useTrackingStore(s => s.currentPosition);
   const todayLog = useTrackingStore(s => s.todayLog);
-  const livePoints = useTrackingStore(s => s.livePoints);
+  const liveVersion = useTrackingStore(s => s.liveVersion);
 
   const trips = useMemo(() => {
     if (!todayLog) return [];
@@ -46,19 +46,18 @@ export default function MapScreen() {
   }, [todayLog]);
 
   const liveShape = useMemo(() => {
-    if (livePoints.length < 2) return null;
-    const coords = livePoints.length >= 3
-      ? catmullRomSpline(livePoints, 8)
-      : livePoints.map(p => [p.longitude, p.latitude]);
+    const pts = getLiveBuffer();
+    if (pts.length < 2) return null;
     return {
       type: 'Feature' as const,
       properties: {},
       geometry: {
         type: 'LineString' as const,
-        coordinates: coords,
+        coordinates: pts.map(p => [p.longitude, p.latitude]),
       },
     };
-  }, [livePoints]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveVersion]);
 
   const handleSelectPlace = useCallback((seg: Segment) => {
     setSelectedPlace(prev =>
@@ -129,8 +128,9 @@ export default function MapScreen() {
 
         {/* Route polylines */}
         {trips.map(trip => {
+          const hasMatchedRoute = !!trip.simplifiedPoints;
           const raw = trip.simplifiedPoints || trip.points;
-          const coords = raw.length >= 3
+          const coords = !hasMatchedRoute && raw.length >= 3
             ? catmullRomSpline(raw, 8)
             : raw.map(p => [p.longitude, p.latitude]);
           if (coords.length < 2) return null;

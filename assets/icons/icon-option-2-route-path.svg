@@ -16,36 +16,45 @@
   <rect width="1024" height="1024" fill="url(#bg2)" rx="224"/>
 
   <!-- Subtle radial glow -->
-  <circle cx="512" cy="512" r="380" fill="#1E3A5F" opacity="0.12"/>
+  <circle cx="512" cy="512" r="440" fill="#1E3A5F" opacity="0.1"/>
 
-  <!-- Route path - a flowing S-curve representing a journey -->
-  <path d="M260,760 C260,760 320,620 420,560 C520,500 600,580 600,480 C600,380 480,340 520,260 C560,180 680,220 740,280"
-        fill="none" stroke="url(#pathGrad)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Route path glow (thicker, wider spread) -->
+  <path d="M180,860 C180,860 280,640 420,560
+           C560,480 660,580 660,440
+           C660,300 500,260 560,160
+           C620,60 780,100 860,180"
+        fill="none" stroke="#60A5FA" stroke-width="52"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.10"/>
 
-  <!-- Path glow -->
-  <path d="M260,760 C260,760 320,620 420,560 C520,500 600,580 600,480 C600,380 480,340 520,260 C560,180 680,220 740,280"
-        fill="none" stroke="#60A5FA" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <!-- Route path — much thicker, fills more canvas -->
+  <path d="M180,860 C180,860 280,640 420,560
+           C560,480 660,580 660,440
+           C660,300 500,260 560,160
+           C620,60 780,100 860,180"
+        fill="none" stroke="url(#pathGrad)" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Start point -->
-  <circle cx="260" cy="760" r="24" fill="#1E3A5F" stroke="#3B82F6" stroke-width="5"/>
-  <circle cx="260" cy="760" r="10" fill="#3B82F6"/>
+  <!-- Start point — larger -->
+  <circle cx="180" cy="860" r="36" fill="#1E3A5F" stroke="#3B82F6" stroke-width="7"/>
+  <circle cx="180" cy="860" r="16" fill="#3B82F6"/>
 
-  <!-- Waypoints along the path -->
-  <circle cx="420" cy="560" r="16" fill="#1E3A5F" stroke="#60A5FA" stroke-width="4"/>
-  <circle cx="420" cy="560" r="7" fill="#60A5FA"/>
+  <!-- Waypoint 1 -->
+  <circle cx="420" cy="560" r="26" fill="#1E3A5F" stroke="#60A5FA" stroke-width="6"/>
+  <circle cx="420" cy="560" r="11" fill="#60A5FA"/>
 
-  <circle cx="600" cy="480" r="16" fill="#1E3A5F" stroke="#60A5FA" stroke-width="4"/>
-  <circle cx="600" cy="480" r="7" fill="#60A5FA"/>
+  <!-- Waypoint 2 -->
+  <circle cx="660" cy="440" r="26" fill="#1E3A5F" stroke="#60A5FA" stroke-width="6"/>
+  <circle cx="660" cy="440" r="11" fill="#60A5FA"/>
 
-  <!-- End point / current location - larger, more prominent -->
-  <circle cx="740" cy="280" r="36" fill="#3B82F6" opacity="0.15"/>
-  <circle cx="740" cy="280" r="26" fill="#0F2240" stroke="#93C5FD" stroke-width="5"/>
-  <circle cx="740" cy="280" r="12" fill="#93C5FD"/>
+  <!-- End point / current location — largest, most prominent -->
+  <circle cx="860" cy="180" r="56" fill="#3B82F6" opacity="0.15"/>
+  <circle cx="860" cy="180" r="42" fill="#0F2240" stroke="#93C5FD" stroke-width="7"/>
+  <circle cx="860" cy="180" r="20" fill="#93C5FD"/>
 
-  <!-- Small decorative dots (places visited) -->
-  <circle cx="340" cy="660" r="5" fill="#2563EB" opacity="0.5"/>
-  <circle cx="480" cy="520" r="5" fill="#3B82F6" opacity="0.5"/>
-  <circle cx="560" cy="540" r="5" fill="#3B82F6" opacity="0.4"/>
-  <circle cx="540" cy="360" r="5" fill="#60A5FA" opacity="0.5"/>
-  <circle cx="640" cy="300" r="5" fill="#60A5FA" opacity="0.4"/>
+  <!-- Decorative dots (places visited) — bigger -->
+  <circle cx="300" cy="720" r="8" fill="#2563EB" opacity="0.55"/>
+  <circle cx="480" cy="530" r="8" fill="#3B82F6" opacity="0.55"/>
+  <circle cx="590" cy="540" r="8" fill="#3B82F6" opacity="0.45"/>
+  <circle cx="560" cy="320" r="8" fill="#60A5FA" opacity="0.55"/>
+  <circle cx="700" cy="240" r="8" fill="#60A5FA" opacity="0.45"/>
 </svg>

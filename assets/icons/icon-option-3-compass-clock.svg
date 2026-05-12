@@ -13,53 +13,55 @@
   <!-- Background -->
   <rect width="1024" height="1024" fill="url(#bg3)" rx="224"/>
 
-  <!-- Outer glow ring -->
-  <circle cx="512" cy="512" r="340" fill="none" stroke="#1E3A5F" stroke-width="2" opacity="0.5"/>
+  <!-- Outer glow ring — bigger radius -->
+  <circle cx="512" cy="512" r="430" fill="none" stroke="#1E3A5F" stroke-width="2" opacity="0.5"/>
 
-  <!-- Main circle ring -->
-  <circle cx="512" cy="512" r="280" fill="none" stroke="url(#ringGrad)" stroke-width="8"/>
+  <!-- Main circle ring — bigger, bolder -->
+  <circle cx="512" cy="512" r="370" fill="none" stroke="url(#ringGrad)" stroke-width="12"/>
 
-  <!-- Compass/clock tick marks -->
-  <g stroke="#3B82F6" stroke-width="4" opacity="0.6">
+  <!-- Inner accent ring -->
+  <circle cx="512" cy="512" r="340" fill="none" stroke="#1E3A5F" stroke-width="2" opacity="0.4"/>
+
+  <!-- Compass/clock tick marks — bigger -->
+  <g stroke="#3B82F6" stroke-width="6" opacity="0.7">
     <!-- N -->
-    <line x1="512" y1="242" x2="512" y2="272"/>
+    <line x1="512" y1="152" x2="512" y2="198"/>
     <!-- E -->
-    <line x1="782" y1="512" x2="752" y2="512"/>
+    <line x1="872" y1="512" x2="826" y2="512"/>
     <!-- S -->
-    <line x1="512" y1="782" x2="512" y2="752"/>
+    <line x1="512" y1="872" x2="512" y2="826"/>
     <!-- W -->
-    <line x1="242" y1="512" x2="272" y2="512"/>
+    <line x1="152" y1="512" x2="198" y2="512"/>
   </g>
 
-  <!-- Small tick marks -->
-  <g stroke="#2563EB" stroke-width="2" opacity="0.4">
-    <line x1="610" y1="249" x2="600" y2="270"/>
-    <line x1="700" y1="330" x2="684" y2="346"/>
-    <line x1="775" y1="414" x2="754" y2="424"/>
-    <line x1="775" y1="610" x2="754" y2="600"/>
-    <line x1="700" y1="694" x2="684" y2="678"/>
-    <line x1="610" y1="775" x2="600" y2="754"/>
-    <line x1="414" y1="775" x2="424" y2="754"/>
-    <line x1="324" y1="694" x2="340" y2="678"/>
-    <line x1="249" y1="610" x2="270" y2="600"/>
-    <line x1="249" y1="414" x2="270" y2="424"/>
-    <line x1="324" y1="330" x2="340" y2="346"/>
-    <line x1="414" y1="249" x2="424" y2="270"/>
+  <!-- Small tick marks — bigger -->
+  <g stroke="#2563EB" stroke-width="3" opacity="0.45">
+    <line x1="628" y1="162" x2="614" y2="188"/>
+    <line x1="740" y1="296" x2="720" y2="316"/>
+    <line x1="862" y1="628" x2="836" y2="614"/>
+    <line x1="728" y1="740" x2="708" y2="720"/>
+    <line x1="396" y1="862" x2="410" y2="836"/>
+    <line x1="284" y1="728" x2="304" y2="708"/>
+    <line x1="162" y1="396" x2="188" y2="410"/>
+    <line x1="296" y1="284" x2="316" y2="304"/>
   </g>
 
-  <!-- Compass diamond / North pointer -->
-  <polygon points="512,260 530,480 512,500 494,480" fill="#60A5FA" opacity="0.9"/>
-  <polygon points="512,764 530,544 512,524 494,544" fill="#1E3A5F" stroke="#2563EB" stroke-width="1"/>
+  <!-- Compass diamond / North pointer — larger -->
+  <polygon points="512,182 536,490 512,516 488,490" fill="#60A5FA" opacity="0.95"/>
+  <polygon points="512,842 536,534 512,508 488,534" fill="#1E3A5F" stroke="#2563EB" stroke-width="2"/>
 
-  <!-- Clock hand (representing time/timeline) -->
-  <line x1="512" y1="512" x2="680" y2="400" stroke="#93C5FD" stroke-width="6" stroke-linecap="round"/>
+  <!-- Clock hand — longer, bolder -->
+  <line x1="512" y1="512" x2="730" y2="340" stroke="#93C5FD" stroke-width="9" stroke-linecap="round"/>
 
-  <!-- Center dot -->
-  <circle cx="512" cy="512" r="18" fill="#0A1628" stroke="#60A5FA" stroke-width="4"/>
-  <circle cx="512" cy="512" r="8" fill="#93C5FD"/>
+  <!-- Second hand (short) -->
+  <line x1="512" y1="512" x2="400" y2="620" stroke="#3B82F6" stroke-width="5" stroke-linecap="round" opacity="0.6"/>
 
-  <!-- Location pulse rings -->
-  <circle cx="680" cy="400" r="20" fill="#93C5FD" opacity="0.15"/>
-  <circle cx="680" cy="400" r="10" fill="#93C5FD" opacity="0.5"/>
-  <circle cx="680" cy="400" r="5" fill="#93C5FD"/>
+  <!-- Center dot — bigger -->
+  <circle cx="512" cy="512" r="26" fill="#0A1628" stroke="#60A5FA" stroke-width="6"/>
+  <circle cx="512" cy="512" r="12" fill="#93C5FD"/>
+
+  <!-- Location pulse rings at hand tip -->
+  <circle cx="730" cy="340" r="30" fill="#93C5FD" opacity="0.12"/>
+  <circle cx="730" cy="340" r="18" fill="#93C5FD" opacity="0.45"/>
+  <circle cx="730" cy="340" r="9" fill="#93C5FD"/>
 </svg>

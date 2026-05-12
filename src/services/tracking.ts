@@ -22,6 +22,7 @@ import {
 } from './backgroundTasks';
 import { gpsFilter } from './gpsFilter';
 import { database } from './database';
+import { matchToRoads } from './mapMatching';
 import { format } from 'date-fns';
 
 class TrackingService {
@@ -453,6 +454,21 @@ class TrackingService {
 
     if (segmentType === 'trip') {
       segment.distance = this.calculateSegmentDistance();
+
+      try {
+        const matched = await matchToRoads(points, segment.activity);
+        if (matched && matched.confidence > 0.3) {
+          segment.simplifiedPoints = matched.coordinates;
+          segment.distance = matched.distance;
+          if (__DEV__) {
+            console.log(
+              `[Finalize] map-matched: ${matched.coordinates.length} road pts, conf=${matched.confidence.toFixed(2)}`,
+            );
+          }
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[Finalize] map matching failed, using raw:', e);
+      }
     }
 
     useTrackingStore.getState().addSegment(segment);
