@@ -1,4 +1,10 @@
-import { Platform, PermissionsAndroid, AppState, Alert, Linking } from 'react-native';
+import {
+  Platform,
+  PermissionsAndroid,
+  AppState,
+  Alert,
+  Linking,
+} from 'react-native';
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import {
@@ -9,6 +15,7 @@ import {
   DEFAULT_SETTINGS,
 } from '../models/types';
 import { useTrackingStore } from '../store/trackingStore';
+import { useGroupStore } from '../store/groupStore';
 import { placeDetectionService } from './placeDetection';
 import { classifyFromSensors, classifyBySpeed } from './activityClassifier';
 import { generateId, haversineDistance } from '../utils/geo';
@@ -36,19 +43,26 @@ class TrackingService {
   private isCharging = false;
   private batteryLevelSub: Battery.Subscription | null = null;
   private batteryStateSub: Battery.Subscription | null = null;
+  private appStateSub: ReturnType<typeof AppState.addEventListener> | null =
+    null;
   private pendingConfig: ExpoLocationConfig | null = null;
   private lastLivePoint: { latitude: number; longitude: number } | null = null;
+  private lastPublishedPoint: { latitude: number; longitude: number } | null =
+    null;
+  private lastPublishAt = 0;
   private simActivity: ActivityType | null = null;
   private lowSpeedSince: number | null = null;
   private highSpeedSince: number | null = null;
   private static readonly SPEED_STATIONARY_THRESHOLD = 0.5; // m/s
   private static readonly SPEED_MOVING_THRESHOLD = 1.5; // m/s
-  private static readonly STOP_CONFIRM_MS = 90_000;  // 90s of low speed to confirm stop
-  private static readonly MOVE_CONFIRM_MS = 15_000;  // 15s of high speed to confirm move
+  private static readonly STOP_CONFIRM_MS = 90_000; // 90s of low speed to confirm stop
+  private static readonly MOVE_CONFIRM_MS = 15_000; // 15s of high speed to confirm move
+  // Throttle Firestore live-point writes (quota/perf). The local trail still
+  // renders every >5m; we only push to the cloud every Ns AND every Mm.
+  private static readonly LIVE_PUBLISH_INTERVAL_MS = 8_000;
+  private static readonly LIVE_PUBLISH_DISTANCE_M = 20;
 
-  async configure(
-    _settings: AppSettings = DEFAULT_SETTINGS,
-  ): Promise<void> {
+  async configure(_settings: AppSettings = DEFAULT_SETTINGS): Promise<void> {
     if (this.isConfigured) return;
 
     await placeGeofenceManager.init();
@@ -74,7 +88,7 @@ class TrackingService {
       throw { code: 0, message: 'Background location permission denied' };
     }
 
-    registerLocationHandler((locations) => {
+    registerLocationHandler(locations => {
       for (const loc of locations) {
         this.onLocation(loc);
       }
@@ -92,16 +106,26 @@ class TrackingService {
 
     this.setupBatteryMonitoring();
 
+    // Re-arm the battery listeners + pull a fresh reading whenever the app
+    // returns to the foreground (iOS suspends JS in the background, so the
+    // listeners can go stale/dead while away).
+    this.appStateSub = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        this.setupBatteryMonitoring();
+      }
+    });
+
     await motionDetector.start(
-      (moving) => this.onMotionChange(moving),
-      (activity, confidence) => this.onNativeActivityChange(activity, confidence),
+      moving => this.onMotionChange(moving),
+      (activity, confidence) =>
+        this.onNativeActivityChange(activity, confidence),
     );
 
-    powerManager.registerConfigChangeCallback(async (config) => {
+    powerManager.registerConfigChangeCallback(async config => {
       await this.restartLocationUpdates(config);
     });
 
-    AppState.addEventListener('change', (state) => {
+    AppState.addEventListener('change', state => {
       if (state === 'active' && this.pendingConfig) {
         this.restartLocationUpdates(this.pendingConfig);
       }
@@ -156,20 +180,29 @@ class TrackingService {
     motionDetector.reset();
     gpsFilter.reset();
 
-    this.batteryLevelSub?.remove();
-    this.batteryStateSub?.remove();
-    this.batteryLevelSub = null;
-    this.batteryStateSub = null;
+    // Keep the battery listeners alive for the whole app session — they're set
+    // up once in configure() and aren't re-armed by start(), so tearing them
+    // down here would freeze the battery reading after the first Stop.
 
-    try { database.clearPending(); } catch {}
+    try {
+      database.clearPending();
+    } catch {}
 
     useTrackingStore.getState().clearLivePoints();
     useTrackingStore.getState().setTracking(false);
+    // Stopped tracking entirely: leave a "last-seen" point for the group.
+    useGroupStore.getState().markStationary();
   }
 
   async getCurrentPosition(): Promise<GpsPoint> {
+    const last = await Location.getLastKnownPositionAsync({
+      maxAge: 30_000,
+      requiredAccuracy: 100,
+    });
+    if (last) return this.locationToGpsPoint(last);
+
     const location = await Location.getCurrentPositionAsync({
-      accuracy: Location.LocationAccuracy.High,
+      accuracy: Location.LocationAccuracy.Balanced,
     });
     return this.locationToGpsPoint(location);
   }
@@ -201,15 +234,23 @@ class TrackingService {
       });
       this.pendingConfig = null;
       this.restartHeartbeat();
-      console.log(`[Tracking] Restarted with accuracy=${config.accuracy}, dist=${config.distanceInterval}m`);
+      console.log(
+        `[Tracking] Restarted with accuracy=${config.accuracy}, dist=${config.distanceInterval}m`,
+      );
     } catch {
       this.pendingConfig = config;
     }
   }
 
   private setupBatteryMonitoring(): void {
+    // Idempotent: drop any existing listeners first so this can be re-run on
+    // app foreground to re-arm the subscriptions and refresh a fresh reading.
+    this.batteryLevelSub?.remove();
+    this.batteryStateSub?.remove();
+
     Battery.getBatteryLevelAsync().then(level => {
       this.batteryLevel = level;
+      powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
     });
     Battery.getBatteryStateAsync().then(state => {
       this.isCharging =
@@ -217,17 +258,21 @@ class TrackingService {
         state === Battery.BatteryState.FULL;
     });
 
-    this.batteryLevelSub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-      this.batteryLevel = batteryLevel;
-      powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
-    });
+    this.batteryLevelSub = Battery.addBatteryLevelListener(
+      ({ batteryLevel }) => {
+        this.batteryLevel = batteryLevel;
+        powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
+      },
+    );
 
-    this.batteryStateSub = Battery.addBatteryStateListener(({ batteryState }) => {
-      this.isCharging =
-        batteryState === Battery.BatteryState.CHARGING ||
-        batteryState === Battery.BatteryState.FULL;
-      powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
-    });
+    this.batteryStateSub = Battery.addBatteryStateListener(
+      ({ batteryState }) => {
+        this.isCharging =
+          batteryState === Battery.BatteryState.CHARGING ||
+          batteryState === Battery.BatteryState.FULL;
+        powerManager.onBatteryUpdate(this.batteryLevel, this.isCharging);
+      },
+    );
   }
 
   private onLocation(location: Location.LocationObject): void {
@@ -257,7 +302,10 @@ class TrackingService {
         }
       } else {
         const accelVariance = motionDetector.getAccelVariance();
-        const { activity, confidence } = classifyFromSensors(gpsSpeed, accelVariance);
+        const { activity, confidence } = classifyFromSensors(
+          gpsSpeed,
+          accelVariance,
+        );
         point.activity = activity;
         point.confidence = confidence;
       }
@@ -274,7 +322,9 @@ class TrackingService {
 
     if (!result.accepted) {
       if (__DEV__) {
-        console.log(`[GPS] rejected: ${result.reason} acc=${point.accuracy.toFixed(0)}m`);
+        console.log(
+          `[GPS] rejected: ${result.reason} acc=${point.accuracy.toFixed(0)}m`,
+        );
       }
       // Still update position for UI even if rejected, but don't record
       if (gpsFilter.getConsecutiveRejections() < 5) {
@@ -282,7 +332,9 @@ class TrackingService {
       }
       // Too many rejections — accept raw to avoid data gaps
       if (__DEV__) {
-        console.log('[GPS] fallback: accepting raw after 5 consecutive rejections');
+        console.log(
+          '[GPS] fallback: accepting raw after 5 consecutive rejections',
+        );
       }
     }
 
@@ -292,7 +344,11 @@ class TrackingService {
     }
 
     if (__DEV__) {
-      console.log(`[Location] ${point.latitude.toFixed(5)},${point.longitude.toFixed(5)} spd=${point.speed.toFixed(1)} acc=${point.accuracy.toFixed(0)}m`);
+      console.log(
+        `[Location] ${point.latitude.toFixed(5)},${point.longitude.toFixed(
+          5,
+        )} spd=${point.speed.toFixed(1)} acc=${point.accuracy.toFixed(0)}m`,
+      );
     }
 
     useTrackingStore.getState().updatePosition(point);
@@ -314,6 +370,28 @@ class TrackingService {
         const live = { latitude: point.latitude, longitude: point.longitude };
         useTrackingStore.getState().appendLivePoint(live);
         this.lastLivePoint = live;
+
+        // Push to Firestore at a throttled cadence to save quota/battery:
+        // at most once per LIVE_PUBLISH_INTERVAL_MS and only after moving
+        // LIVE_PUBLISH_DISTANCE_M. The local trail above stays fine-grained.
+        const lp = this.lastPublishedPoint;
+        const farEnough =
+          !lp ||
+          haversineDistance(
+            lp.latitude,
+            lp.longitude,
+            point.latitude,
+            point.longitude,
+          ) >= TrackingService.LIVE_PUBLISH_DISTANCE_M;
+        if (
+          farEnough &&
+          point.timestamp - this.lastPublishAt >=
+            TrackingService.LIVE_PUBLISH_INTERVAL_MS
+        ) {
+          useGroupStore.getState().publishPosition(point);
+          this.lastPublishAt = point.timestamp;
+          this.lastPublishedPoint = live;
+        }
       }
     }
 
@@ -327,7 +405,13 @@ class TrackingService {
         if (this.lowSpeedSince === null) this.lowSpeedSince = now;
         this.highSpeedSince = null;
         if (now - this.lowSpeedSince >= TrackingService.STOP_CONFIRM_MS) {
-          if (__DEV__) console.log(`[Tracking] speed-based stop confirmed (${((now - this.lowSpeedSince) / 1000).toFixed(0)}s low-speed)`);
+          if (__DEV__)
+            console.log(
+              `[Tracking] speed-based stop confirmed (${(
+                (now - this.lowSpeedSince) /
+                1000
+              ).toFixed(0)}s low-speed)`,
+            );
           this.lowSpeedSince = null;
           this.onMotionChange(false);
         }
@@ -339,7 +423,13 @@ class TrackingService {
         if (this.highSpeedSince === null) this.highSpeedSince = now;
         this.lowSpeedSince = null;
         if (now - this.highSpeedSince >= TrackingService.MOVE_CONFIRM_MS) {
-          if (__DEV__) console.log(`[Tracking] speed-based move confirmed (${((now - this.highSpeedSince) / 1000).toFixed(0)}s high-speed)`);
+          if (__DEV__)
+            console.log(
+              `[Tracking] speed-based move confirmed (${(
+                (now - this.highSpeedSince) /
+                1000
+              ).toFixed(0)}s high-speed)`,
+            );
           this.highSpeedSince = null;
           this.onMotionChange(true);
         }
@@ -348,11 +438,18 @@ class TrackingService {
         // Displacement check: if we've drifted >150m from segment start, we're moving
         const first = this.currentPoints[0];
         const displacement = haversineDistance(
-          first.latitude, first.longitude,
-          point.latitude, point.longitude,
+          first.latitude,
+          first.longitude,
+          point.latitude,
+          point.longitude,
         );
         if (displacement > 150) {
-          if (__DEV__) console.log(`[Tracking] displacement-based move detected (${displacement.toFixed(0)}m from start)`);
+          if (__DEV__)
+            console.log(
+              `[Tracking] displacement-based move detected (${displacement.toFixed(
+                0,
+              )}m from start)`,
+            );
           this.lowSpeedSince = null;
           this.onMotionChange(true);
         }
@@ -362,7 +459,10 @@ class TrackingService {
     }
   }
 
-  private onNativeActivityChange(activity: ActivityType, confidence: number): void {
+  private onNativeActivityChange(
+    activity: ActivityType,
+    confidence: number,
+  ): void {
     useTrackingStore.getState().updateCurrentActivity(activity);
     powerManager.onActivityChange(activity, confidence);
   }
@@ -376,6 +476,10 @@ class TrackingService {
       this.finalizeCurrentSegment();
       this.isMoving = isMoving;
       this.startNewSegment();
+      if (!isMoving) {
+        // Stationary: stop our trail; leave a "last-seen" point (2-min window).
+        useGroupStore.getState().markStationary();
+      }
     } else {
       this.isMoving = isMoving;
     }
@@ -386,6 +490,8 @@ class TrackingService {
     this.pendingPointIndex = 0;
     this.segmentStartTime = Date.now();
     this.lastLivePoint = null;
+    this.lastPublishedPoint = null;
+    this.lastPublishAt = 0;
     this.lowSpeedSince = null;
     this.highSpeedSince = null;
     useTrackingStore.getState().clearLivePoints();
@@ -411,7 +517,9 @@ class TrackingService {
     const segmentType = this.isMoving ? 'trip' : 'visit';
     if (__DEV__) {
       console.log(
-        `[Finalize] type=${segmentType} points=${this.currentPoints.length} dur=${Math.round((now - this.segmentStartTime) / 1000)}s`,
+        `[Finalize] type=${segmentType} points=${
+          this.currentPoints.length
+        } dur=${Math.round((now - this.segmentStartTime) / 1000)}s`,
       );
     }
 
@@ -436,7 +544,8 @@ class TrackingService {
         segment.place = place;
         await placeGeofenceManager.ensureGeofence(place);
       } else if (now - this.segmentStartTime >= 120_000) {
-        const centroid = this.currentPoints[Math.floor(this.currentPoints.length / 2)];
+        const centroid =
+          this.currentPoints[Math.floor(this.currentPoints.length / 2)];
         segment.place = {
           id: generateId(),
           name: 'Unknown Location',
@@ -457,17 +566,23 @@ class TrackingService {
 
       try {
         const matched = await matchToRoads(points, segment.activity);
-        if (matched && matched.confidence > 0.3) {
+        if (matched && matched.confidence > 0.1) {
           segment.simplifiedPoints = matched.coordinates;
           segment.distance = matched.distance;
-          if (__DEV__) {
-            console.log(
-              `[Finalize] map-matched: ${matched.coordinates.length} road pts, conf=${matched.confidence.toFixed(2)}`,
-            );
-          }
+          console.log(
+            `[Finalize] map-matched: ${
+              matched.coordinates.length
+            } road pts, conf=${matched.confidence.toFixed(2)}`,
+          );
+        } else {
+          console.log(
+            `[Finalize] map matching skipped: ${
+              matched ? `low conf=${matched.confidence.toFixed(2)}` : 'no match'
+            } — falling back to raw`,
+          );
         }
       } catch (e) {
-        if (__DEV__) console.warn('[Finalize] map matching failed, using raw:', e);
+        console.warn('[Finalize] map matching failed, using raw:', e);
       }
     }
 
@@ -480,6 +595,50 @@ class TrackingService {
     }
   }
 
+  async rematchTrips(
+    dateKey: string,
+  ): Promise<{ ok: number; failed: number; skipped: number }> {
+    const segments = await database.getSegmentsByDate(dateKey);
+    const trips = segments.filter(
+      s => s.type === 'trip' && s.points.length >= 2,
+    );
+    console.log(`[Rematch] starting for ${dateKey}: ${trips.length} trips`);
+
+    let ok = 0;
+    let failed = 0;
+    let skipped = 0;
+    for (const trip of trips) {
+      try {
+        const matched = await matchToRoads(trip.points, trip.activity);
+        if (matched && matched.confidence > 0.1) {
+          trip.simplifiedPoints = matched.coordinates;
+          trip.distance = matched.distance;
+          await database.insertSegment(trip, dateKey);
+          ok++;
+          console.log(
+            `[Rematch] trip ${trip.id} ok conf=${matched.confidence.toFixed(
+              2,
+            )}`,
+          );
+        } else {
+          skipped++;
+          console.log(
+            `[Rematch] trip ${trip.id} skipped: ${
+              matched ? `conf=${matched.confidence.toFixed(2)}` : 'no match'
+            }`,
+          );
+        }
+      } catch (e) {
+        failed++;
+        console.warn(`[Rematch] trip ${trip.id} error:`, e);
+      }
+    }
+
+    console.log(`[Rematch] done: ok=${ok} failed=${failed} skipped=${skipped}`);
+    await useTrackingStore.getState().loadDayLog(dateKey);
+    return { ok, failed, skipped };
+  }
+
   private locationToGpsPoint(location: Location.LocationObject): GpsPoint {
     return {
       id: generateId(),
@@ -490,7 +649,11 @@ class TrackingService {
       speed: location.coords.speed ?? 0,
       heading: location.coords.heading ?? 0,
       timestamp: location.timestamp,
-      batteryLevel: this.batteryLevel,
+      // expo-battery reports a 0–1 fraction; store as a 0–100 percent so the
+      // UI (and mock data / default of 100) are all on the same scale.
+      // Note: this.batteryLevel stays a fraction for powerManager, which does
+      // its own *100 conversion.
+      batteryLevel: Math.round(this.batteryLevel * 100),
       isMoving: motionDetector.getIsMoving(),
       activity: 'unknown',
       confidence: 0,
@@ -504,13 +667,15 @@ class TrackingService {
     // Weight by time duration between consecutive points
     const durations: Record<string, number> = {};
     for (let i = 1; i < this.currentPoints.length; i++) {
-      const dt = this.currentPoints[i].timestamp - this.currentPoints[i - 1].timestamp;
+      const dt =
+        this.currentPoints[i].timestamp - this.currentPoints[i - 1].timestamp;
       const activity = this.currentPoints[i].activity;
       durations[activity] = (durations[activity] || 0) + dt;
     }
     // Add first point's activity with the first interval
     if (this.currentPoints.length >= 2) {
-      const dt0 = this.currentPoints[1].timestamp - this.currentPoints[0].timestamp;
+      const dt0 =
+        this.currentPoints[1].timestamp - this.currentPoints[0].timestamp;
       const a0 = this.currentPoints[0].activity;
       durations[a0] = (durations[a0] || 0) + dt0;
     }
@@ -567,10 +732,16 @@ class TrackingService {
         const store = useTrackingStore.getState();
         store.clearLivePoints();
         for (const p of pending.points) {
-          store.appendLivePoint({ latitude: p.latitude, longitude: p.longitude });
+          store.appendLivePoint({
+            latitude: p.latitude,
+            longitude: p.longitude,
+          });
         }
         const last = pending.points[pending.points.length - 1];
-        this.lastLivePoint = { latitude: last.latitude, longitude: last.longitude };
+        this.lastLivePoint = {
+          latitude: last.latitude,
+          longitude: last.longitude,
+        };
       }
     } catch (e) {
       console.warn('[Tracking] Failed to recover pending segment:', e);
@@ -643,7 +814,8 @@ class TrackingService {
       }
 
       const [lat, lng] = points[idx];
-      const speed = activity === 'walking' ? 1.4 : activity === 'cycling' ? 4.5 : 8.0;
+      const speed =
+        activity === 'walking' ? 1.4 : activity === 'cycling' ? 4.5 : 8.0;
       const fakeLocation: Location.LocationObject = {
         coords: {
           latitude: lat,
@@ -660,7 +832,9 @@ class TrackingService {
       idx++;
     }, interval);
 
-    console.log(`[Sim] Started ${points.length} points over ${durationMs}ms (${activity})`);
+    console.log(
+      `[Sim] Started ${points.length} points over ${durationMs}ms (${activity})`,
+    );
   }
 
   stopSimulation(): void {
@@ -676,10 +850,7 @@ class TrackingService {
   // Dev: simulate being stationary at a coordinate for `durationMs`,
   // emitting one point every 5 seconds. After it ends, finalizes the
   // visit by triggering a motion-change still→moving (and back to still).
-  simulateStay(
-    coord: [number, number],
-    durationMs = 150000,
-  ): void {
+  simulateStay(coord: [number, number], durationMs = 150000): void {
     if (this.simTimer) {
       clearInterval(this.simTimer);
       this.simTimer = null;
@@ -718,7 +889,9 @@ class TrackingService {
     }, tickMs);
 
     console.log(
-      `[Sim] Started stay at ${coord[0]},${coord[1]} for ${Math.round(durationMs / 1000)}s`,
+      `[Sim] Started stay at ${coord[0]},${coord[1]} for ${Math.round(
+        durationMs / 1000,
+      )}s`,
     );
   }
 

@@ -1,6 +1,15 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import Svg, { Polygon, Line, Circle, Polyline, Path, Defs, LinearGradient, Stop, Ellipse } from 'react-native-svg';
+import Svg, {
+  Polygon,
+  Line,
+  Circle,
+  Polyline,
+  Path,
+  Defs,
+  LinearGradient,
+  Stop,
+} from 'react-native-svg';
 
 interface TabIconProps {
   color: string;
@@ -72,6 +81,42 @@ export function IconStats({ color, active }: TabIconProps) {
           strokeLinejoin="round"
         />
         <Circle cx={13} cy={10} r={1.5} fill={active ? '#F59E0B' : color} />
+      </Svg>
+    </View>
+  );
+}
+
+// Settings tab — green glow
+export function IconSettings({ color, active }: TabIconProps) {
+  const glowColor = '#10B981';
+  const sw = active ? 2.4 : 2;
+  return (
+    <View
+      style={[
+        styles.iconBox,
+        active && {
+          shadowColor: glowColor,
+          shadowOpacity: 0.85,
+          shadowRadius: 14,
+          elevation: 10,
+        },
+      ]}
+    >
+      <Svg width={36} height={36} viewBox="0 0 24 24" fill="none">
+        <Circle
+          cx={12}
+          cy={12}
+          r={3}
+          stroke={active ? '#6EE7B7' : color}
+          strokeWidth={sw}
+        />
+        <Path
+          d="M19.4 15a8.3 8.3 0 0 0 .1-1.1 8.3 8.3 0 0 0-.1-1.1l2-1.5-2-3.4-2.4 1a8.2 8.2 0 0 0-1.9-1.1L14.8 5h-4l-.4 2.8a8.2 8.2 0 0 0-1.9 1.1l-2.4-1-2 3.4 2 1.5a8.3 8.3 0 0 0-.1 1.1 8.3 8.3 0 0 0 .1 1.1l-2 1.5 2 3.4 2.4-1a8.2 8.2 0 0 0 1.9 1.1l.4 2.8h4l.4-2.8a8.2 8.2 0 0 0 1.9-1.1l2.4 1 2-3.4-2.1-1.5Z"
+          stroke={active ? '#34D399' : color}
+          strokeWidth={sw}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </Svg>
     </View>
   );

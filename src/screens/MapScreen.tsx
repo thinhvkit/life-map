@@ -1,7 +1,14 @@
-import React, { useRef, useMemo, useState, useCallback } from 'react';
+import React, {
+  useRef,
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+} from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
   Pressable,
@@ -10,28 +17,112 @@ import {
   Alert,
 } from 'react-native';
 import MapboxGL from '@rnmapbox/maps';
+import {
+  isToday,
+  isYesterday,
+  parseISO,
+  format,
+  differenceInMinutes,
+} from 'date-fns';
 import { useTrackingStore, getLiveBuffer } from '../store/trackingStore';
+import { useGroupStore } from '../store/groupStore';
+import { useThemeStore, useThemedStyles } from '../store/themeStore';
 import { trackingService } from '../services/tracking';
-import { T, ACTIVITY_COLORS, PLACE_COLORS, PLACE_ICONS } from '../utils/theme';
+import {
+  T,
+  ACTIVITY_COLORS,
+  PLACE_COLORS,
+  PLACE_ICONS,
+  MAP_STYLE_URL,
+  Palette,
+} from '../utils/theme';
 import { formatDistance, formatDuration, formatTime } from '../utils/geo';
 import { catmullRomSpline } from '../utils/catmullRom';
 import { Segment } from '../models/types';
+import { GroupLivePoint } from '../services/groupLiveLocation';
 
-const HCMC_CENTER: [number, number] = [106.700, 10.777];
+const HCMC_CENTER: [number, number] = [106.7, 10.777];
+
+// Per-family-member colors so each member's trail + avatar share a hue and none
+// of them collide with my own accent-blue live trail.
+const MEMBER_COLORS = [
+  '#22C55E',
+  '#F59E0B',
+  '#EC4899',
+  '#06B6D4',
+  '#A855F7',
+  '#F97316',
+];
+
+function memberColor(uid: string): string {
+  let h = 0;
+  for (let i = 0; i < uid.length; i++) {
+    h = (h * 31 + uid.charCodeAt(i)) >>> 0;
+  }
+  return MEMBER_COLORS[h % MEMBER_COLORS.length];
+}
+
+// Last-seen timestamp label (the "Last seen" wording is dropped — the
+// date/time alone conveys it).
+function formatLastSeen(millis: number): string {
+  if (!millis) return '';
+  const d = new Date(millis);
+  const mins = differenceInMinutes(new Date(), d);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (isToday(d)) return format(d, 'HH:mm');
+  if (isYesterday(d)) return `Yesterday ${format(d, 'HH:mm')}`;
+  return format(d, 'MMM d, HH:mm');
+}
 
 export default function MapScreen() {
+  const styles = useThemedStyles(makeStyles);
+  const themeMode = useThemeStore(s => s.mode);
   const cameraRef = useRef<MapboxGL.Camera>(null);
+  const didFitFamilyRef = useRef(false);
   const [selectedPlace, setSelectedPlace] = useState<Segment | null>(null);
 
   const isTracking = useTrackingStore(s => s.isTracking);
   const currentPosition = useTrackingStore(s => s.currentPosition);
   const todayLog = useTrackingStore(s => s.todayLog);
   const liveVersion = useTrackingStore(s => s.liveVersion);
+  const selectedDate = useTrackingStore(s => s.selectedDate);
+  const dateMode = useTrackingStore(s => s.dateMode);
+
+  // Live mode = actively tracking today's timeline; anything else (a past day,
+  // month/year aggregates, or tracking off) is "filter" mode. In live mode we
+  // only show the live trail (livePoint); finished route polylines are hidden.
+  const isLiveMode =
+    isTracking && dateMode === 'day' && isToday(parseISO(selectedDate));
+  const currentUser = useGroupStore(s => s.currentUser);
+  const liveMembers = useGroupStore(s => s.liveMembers);
+  const memberTrails = useGroupStore(s => s.memberTrails);
 
   const trips = useMemo(() => {
     if (!todayLog) return [];
     return todayLog.segments.filter(s => s.type === 'trip');
   }, [todayLog]);
+
+  // Bridge trips that share an activity and have a small temporal gap (< 60s)
+  // so brief stop-detector blips don't render as visually disconnected polylines.
+  const tripGroups = useMemo(() => {
+    const BRIDGE_GAP_MS = 60_000;
+    const groups: Segment[][] = [];
+    for (const trip of trips) {
+      const last = groups[groups.length - 1];
+      const tail = last?.[last.length - 1];
+      if (
+        tail &&
+        tail.activity === trip.activity &&
+        trip.startTime - tail.endTime <= BRIDGE_GAP_MS
+      ) {
+        last.push(trip);
+      } else {
+        groups.push([trip]);
+      }
+    }
+    return groups;
+  }, [trips]);
 
   const uniquePlaces = useMemo(() => {
     if (!todayLog) return [];
@@ -44,6 +135,62 @@ export default function MapScreen() {
       });
     return [...seen.values()];
   }, [todayLog]);
+
+  const visibleFamilyMembers = useMemo(
+    () =>
+      liveMembers.filter(
+        member => member.uid !== currentUser?.uid || !isTracking,
+      ),
+    [currentUser?.uid, isTracking, liveMembers],
+  );
+
+  const familyCoordinates = useMemo(() => {
+    const coords = visibleFamilyMembers.map(
+      member => [member.longitude, member.latitude] as [number, number],
+    );
+    if (currentPosition) {
+      coords.push([currentPosition.longitude, currentPosition.latitude]);
+    }
+    return coords;
+  }, [currentPosition, visibleFamilyMembers]);
+
+  useEffect(() => {
+    if (didFitFamilyRef.current || familyCoordinates.length === 0) return;
+    didFitFamilyRef.current = true;
+
+    if (familyCoordinates.length === 1) {
+      cameraRef.current?.setCamera({
+        centerCoordinate: familyCoordinates[0],
+        zoomLevel: 14,
+        animationDuration: 500,
+      });
+      return;
+    }
+
+    const lngs = familyCoordinates.map(coord => coord[0]);
+    const lats = familyCoordinates.map(coord => coord[1]);
+    cameraRef.current?.fitBounds(
+      [Math.max(...lngs), Math.max(...lats)],
+      [Math.min(...lngs), Math.min(...lats)],
+      [120, 48, 160, 48],
+      700,
+    );
+  }, [familyCoordinates]);
+
+  // Realtime family trails: recomputed whenever a new snapshot updates
+  // `memberTrails` (or the visible set changes), so each Mapbox source updates
+  // exactly when fresh data arrives and stays untouched otherwise.
+  const memberTrailFeatures = useMemo(
+    () =>
+      visibleFamilyMembers
+        .map(member => ({
+          uid: member.uid,
+          color: memberColor(member.uid),
+          coords: memberTrails[member.uid],
+        }))
+        .filter(t => t.coords && t.coords.length >= 2),
+    [visibleFamilyMembers, memberTrails],
+  );
 
   const liveShape = useMemo(() => {
     const pts = getLiveBuffer();
@@ -112,7 +259,7 @@ export default function MapScreen() {
     <View style={styles.container}>
       <MapboxGL.MapView
         style={styles.map}
-        styleURL={MapboxGL.StyleURL.Dark}
+        styleURL={MAP_STYLE_URL[themeMode]}
         compassEnabled={false}
         rotateEnabled={false}
         attributionEnabled={false}
@@ -126,20 +273,26 @@ export default function MapScreen() {
           }}
         />
 
-        {/* Route polylines */}
-        {trips.map(trip => {
-          const hasMatchedRoute = !!trip.simplifiedPoints;
-          const raw = trip.simplifiedPoints || trip.points;
-          const coords = !hasMatchedRoute && raw.length >= 3
-            ? catmullRomSpline(raw, 8)
-            : raw.map(p => [p.longitude, p.latitude]);
+        {/* Route polylines — hidden in live mode (only the live trail shows) */}
+        {!isLiveMode && tripGroups.map(group => {
+          const head = group[0];
+          const coords: [number, number][] = [];
+          for (const trip of group) {
+            const raw = trip.simplifiedPoints || trip.points;
+            const segCoords =
+              !trip.simplifiedPoints && raw.length >= 3
+                ? catmullRomSpline(raw, 8)
+                : raw.map(p => [p.longitude, p.latitude] as [number, number]);
+            coords.push(...segCoords);
+          }
           if (coords.length < 2) return null;
-          const color = ACTIVITY_COLORS[trip.activity];
+          const color = ACTIVITY_COLORS[head.activity];
+          const groupId = group.map(t => t.id).join('-');
 
           return (
             <MapboxGL.ShapeSource
-              key={trip.id}
-              id={`route-${trip.id}`}
+              key={groupId}
+              id={`route-${groupId}`}
               shape={{
                 type: 'Feature',
                 properties: {},
@@ -149,49 +302,92 @@ export default function MapScreen() {
                 },
               }}
             >
-              {/* Glow layer */}
+              {/* Outer glow */}
               <MapboxGL.LineLayer
-                id={`route-glow-${trip.id}`}
+                id={`route-glow-${groupId}`}
                 style={{
                   lineColor: color,
-                  lineWidth: 12,
-                  lineOpacity: 0.12,
+                  lineWidth: 18,
+                  lineOpacity: 0.16,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+              {/* Inner glow */}
+              <MapboxGL.LineLayer
+                id={`route-glow2-${groupId}`}
+                style={{
+                  lineColor: color,
+                  lineWidth: 9,
+                  lineOpacity: 0.3,
                   lineCap: 'round',
                   lineJoin: 'round',
                 }}
               />
               {/* Main line */}
               <MapboxGL.LineLayer
-                id={`route-line-${trip.id}`}
+                id={`route-line-${groupId}`}
                 style={{
                   lineColor: color,
-                  lineWidth: 4,
-                  lineOpacity: 0.95,
+                  lineWidth: 5,
+                  lineOpacity: 1,
                   lineCap: 'round',
                   lineJoin: 'round',
-                  ...(trip.activity === 'walking'
+                  ...(head.activity === 'walking'
                     ? { lineDasharray: [2, 1.5] }
-                    : trip.activity === 'cycling'
+                    : head.activity === 'cycling'
                     ? { lineDasharray: [4, 1] }
                     : {}),
+                }}
+              />
+              {/* Bright core highlight */}
+              <MapboxGL.LineLayer
+                id={`route-core-${groupId}`}
+                style={{
+                  lineColor: '#FFFFFF',
+                  lineWidth: 1.4,
+                  lineOpacity: 0.45,
+                  lineCap: 'round',
+                  lineJoin: 'round',
                 }}
               />
             </MapboxGL.ShapeSource>
           );
         })}
 
-        {/* Live in-progress polyline */}
+        {/* My live in-progress polyline — accent blue, solid (distinct from
+            family members' dashed, per-member colored trails) */}
         {isTracking && liveShape && (
-          <MapboxGL.ShapeSource id="live-trip" shape={liveShape}>
+          <MapboxGL.ShapeSource id="live-trip" shape={liveShape} lineMetrics>
+            <MapboxGL.LineLayer
+              id="live-trip-glow"
+              style={{
+                lineColor: T.accent,
+                lineWidth: 14,
+                lineOpacity: 0.18,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
+            {/* Gradient body: fades from cyan at the tail to accent at the head */}
             <MapboxGL.LineLayer
               id="live-trip-line"
               style={{
-                lineColor: T.accent,
-                lineWidth: 4,
-                lineOpacity: 0.9,
+                lineWidth: 5,
+                lineOpacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round',
-                lineDasharray: [2, 1.5],
+                lineGradient: [
+                  'interpolate',
+                  ['linear'],
+                  ['line-progress'],
+                  0,
+                  '#22D3EE',
+                  0.5,
+                  '#3B8EF0',
+                  1,
+                  '#6366F1',
+                ],
               }}
             />
           </MapboxGL.ShapeSource>
@@ -207,14 +403,41 @@ export default function MapScreen() {
           />
         ))}
 
+        {/* Family member live trails (reconstructed locally from the stream) */}
+        {memberTrailFeatures.map(({ uid, color, coords }) => (
+          <MapboxGL.ShapeSource
+            key={`member-trail-${uid}`}
+            id={`member-trail-${uid}`}
+            shape={{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: coords! },
+            }}
+          >
+            <MapboxGL.LineLayer
+              id={`member-trail-line-${uid}`}
+              style={{
+                lineColor: color,
+                lineWidth: 4,
+                lineOpacity: 0.85,
+                lineCap: 'round',
+                lineJoin: 'round',
+                lineDasharray: [2, 1.5],
+              }}
+            />
+          </MapboxGL.ShapeSource>
+        ))}
+
+        {/* Online family member markers */}
+        {visibleFamilyMembers.map(member => (
+          <GroupMemberMarker key={member.uid} member={member} />
+        ))}
+
         {/* Current location */}
         {isTracking && currentPosition && (
           <MapboxGL.MarkerView
             id="current-location"
-            coordinate={[
-              currentPosition.longitude,
-              currentPosition.latitude,
-            ]}
+            coordinate={[currentPosition.longitude, currentPosition.latitude]}
           >
             <View style={styles.currentDotOuter}>
               <View style={styles.currentDotInner} />
@@ -233,7 +456,10 @@ export default function MapScreen() {
           { v: formatDistance(stats.dist), l: 'Distance' },
           { v: formatDuration(stats.moving), l: 'Moving' },
           { v: `${stats.places}`, l: 'Places' },
-          { v: `${Math.round(useTrackingStore.getState().batteryLevel)}%`, l: 'Battery' },
+          {
+            v: `${Math.round(useTrackingStore.getState().batteryLevel)}%`,
+            l: 'Battery',
+          },
         ].map(s => (
           <View key={s.l} style={styles.statItem}>
             <Text style={styles.statValue}>{s.v}</Text>
@@ -254,25 +480,73 @@ export default function MapScreen() {
       {showSimPanel && (
         <View style={styles.simPanel}>
           {[
-            { label: 'Walk', action: () => trackingService.simulateRoute(
-              [[10.7731, 106.7030], [10.7735, 106.6995], [10.7750, 106.6975], [10.7770, 106.6950]],
-              30000, 'walking',
-            )},
-            { label: 'Cycle', action: () => trackingService.simulateRoute(
-              [[10.7735, 106.6995], [10.7770, 106.6950], [10.7800, 106.6920], [10.7845, 106.6870]],
-              20000, 'cycling',
-            )},
-            { label: 'Drive', action: () => trackingService.simulateRoute(
-              [[10.7845, 106.6870], [10.7810, 106.6930], [10.7770, 106.6985], [10.7731, 106.7030]],
-              15000, 'driving',
-            )},
-            { label: 'Stay', action: () => trackingService.simulateStay([10.7731, 106.7030], 150000) },
+            {
+              label: 'Walk',
+              action: () =>
+                trackingService.simulateRoute(
+                  [
+                    [10.7731, 106.703],
+                    [10.7735, 106.6995],
+                    [10.775, 106.6975],
+                    [10.777, 106.695],
+                  ],
+                  30000,
+                  'walking',
+                ),
+            },
+            {
+              label: 'Cycle',
+              action: () =>
+                trackingService.simulateRoute(
+                  [
+                    [10.7735, 106.6995],
+                    [10.777, 106.695],
+                    [10.78, 106.692],
+                    [10.7845, 106.687],
+                  ],
+                  20000,
+                  'cycling',
+                ),
+            },
+            {
+              label: 'Drive',
+              action: () =>
+                trackingService.simulateRoute(
+                  [
+                    [10.7845, 106.687],
+                    [10.781, 106.693],
+                    [10.777, 106.6985],
+                    [10.7731, 106.703],
+                  ],
+                  15000,
+                  'driving',
+                ),
+            },
+            {
+              label: 'Stay',
+              action: () =>
+                trackingService.simulateStay([10.7731, 106.703], 150000),
+            },
             { label: 'Stop', action: () => trackingService.stopSimulation() },
+            {
+              label: 'Re-match',
+              action: async () => {
+                const date = useTrackingStore.getState().selectedDate;
+                const res = await trackingService.rematchTrips(date);
+                Alert.alert(
+                  'Re-match done',
+                  `ok=${res.ok} failed=${res.failed} skipped=${res.skipped}`,
+                );
+              },
+            },
           ].map(s => (
             <TouchableOpacity
               key={s.label}
               style={styles.simBtn}
-              onPress={() => { s.action(); setShowSimPanel(false); }}
+              onPress={() => {
+                s.action();
+                setShowSimPanel(false);
+              }}
             >
               <Text style={styles.simBtnText}>{s.label}</Text>
             </TouchableOpacity>
@@ -289,7 +563,9 @@ export default function MapScreen() {
             delayLongPress={800}
             onPress={() => showSimPanel && setShowSimPanel(false)}
           >
-            <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>SIM</Text>
+            <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+              SIM
+            </Text>
           </Pressable>
         )}
         <TouchableOpacity style={styles.fabSmall} onPress={handleCenterOnUser}>
@@ -320,6 +596,7 @@ const PlaceMarker = React.memo(function PlaceMarker({
   isSelected: boolean;
   onPress: (seg: Segment) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const place = segment.place!;
   const color = PLACE_COLORS[place.category || 'other'];
   const icon = PLACE_ICONS[place.category || 'other'];
@@ -334,14 +611,20 @@ const PlaceMarker = React.memo(function PlaceMarker({
         activeOpacity={0.8}
         style={styles.markerContainer}
       >
-        <View style={[styles.markerOuter, { backgroundColor: color + '1F' }]}>
+        <View
+          style={[
+            styles.markerOuter,
+            { backgroundColor: color + '33', borderColor: color + '55' },
+          ]}
+        >
           <View
             style={[
               styles.markerInner,
               {
                 backgroundColor: color,
-                borderColor: isSelected ? '#fff' : T.card,
-                borderWidth: isSelected ? 2.5 : 2,
+                borderColor: isSelected ? '#fff' : '#FFFFFF',
+                borderWidth: isSelected ? 3 : 2,
+                shadowColor: color,
               },
             ]}
           >
@@ -356,6 +639,54 @@ const PlaceMarker = React.memo(function PlaceMarker({
   );
 });
 
+const GroupMemberMarker = React.memo(function GroupMemberMarker({
+  member,
+}: {
+  member: GroupLivePoint;
+}) {
+  const styles = useThemedStyles(makeStyles);
+  const initials = member.displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0]?.toUpperCase())
+    .join('');
+
+  const color = memberColor(member.uid);
+
+  return (
+    <MapboxGL.MarkerView
+      id={`group-member-${member.uid}`}
+      coordinate={[member.longitude, member.latitude]}
+    >
+      <View style={styles.memberMarkerContainer}>
+        <View style={[styles.memberMarkerPulse, { backgroundColor: color + '33' }]}>
+          <View style={[styles.memberMarkerAvatar, { backgroundColor: color }]}>
+            {member.photoURL ? (
+              <Image
+                source={{ uri: member.photoURL }}
+                style={styles.memberMarkerImage}
+              />
+            ) : (
+              <Text style={styles.memberMarkerInitials}>{initials || 'M'}</Text>
+            )}
+          </View>
+        </View>
+        <View style={[styles.memberMarkerLabelWrap, { borderColor: color + '66' }]}>
+          <Text style={styles.memberMarkerName} numberOfLines={1}>
+            {member.displayName}
+          </Text>
+          {!member.isOnline && (
+            <Text style={styles.memberMarkerStatus} numberOfLines={1}>
+              {formatLastSeen(member.updatedAtMillis)}
+            </Text>
+          )}
+        </View>
+      </View>
+    </MapboxGL.MarkerView>
+  );
+});
+
 function PlacePopup({
   segment,
   onClose,
@@ -363,6 +694,7 @@ function PlacePopup({
   segment: Segment;
   onClose: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const place = segment.place!;
   const color = PLACE_COLORS[place.category || 'other'];
   const icon = PLACE_ICONS[place.category || 'other'];
@@ -378,7 +710,10 @@ function PlacePopup({
           <Text style={styles.popupTitle}>{place.name}</Text>
           <Text style={styles.popupAddress}>{place.address}</Text>
         </View>
-        <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <TouchableOpacity
+          onPress={onClose}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
           <Text style={styles.popupClose}>×</Text>
         </TouchableOpacity>
       </View>
@@ -399,6 +734,7 @@ function PlacePopup({
 }
 
 function CrosshairIcon() {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.crosshair}>
       <View style={styles.crosshairDot} />
@@ -410,8 +746,9 @@ function CrosshairIcon() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: T.bg },
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.bg },
   map: { flex: 1 },
 
   // Stats bar
@@ -420,10 +757,10 @@ const styles = StyleSheet.create({
     top: Platform.OS === 'ios' ? 60 : 12,
     left: 12,
     right: 12,
-    backgroundColor: 'rgba(8,14,28,0.9)',
+    backgroundColor: t.overlay,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 10,
@@ -431,14 +768,14 @@ const styles = StyleSheet.create({
   },
   statItem: { alignItems: 'center' },
   statValue: {
-    color: T.text,
+    color: t.text,
     fontSize: 16,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     letterSpacing: -0.5,
   },
   statLabel: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 10,
     marginTop: 2,
     textTransform: 'uppercase',
@@ -448,27 +785,37 @@ const styles = StyleSheet.create({
   // Markers
   markerContainer: { alignItems: 'center' },
   markerOuter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   markerInner: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.55,
+    shadowRadius: 5,
+    elevation: 5,
   },
   markerIcon: { fontSize: 12, color: '#fff' },
   markerLabel: {
-    color: T.textSub,
-    fontSize: 9,
-    fontWeight: '600',
-    marginTop: 2,
+    color: t.text,
+    fontSize: 9.5,
+    fontWeight: '700',
+    marginTop: 3,
     textAlign: 'center',
-    maxWidth: 80,
+    maxWidth: 86,
+    backgroundColor: t.overlay,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    overflow: 'hidden',
   },
 
   // Current location dot
@@ -476,7 +823,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: T.accent + '26',
+    backgroundColor: t.accent + '26',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -484,9 +831,64 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: T.accent,
+    backgroundColor: t.accent,
     borderWidth: 2.5,
     borderColor: '#fff',
+  },
+
+  // Group member markers
+  memberMarkerContainer: {
+    alignItems: 'center',
+  },
+  memberMarkerPulse: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#22C55E33',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberMarkerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#22C55E',
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  memberMarkerImage: {
+    width: 32,
+    height: 32,
+  },
+  memberMarkerInitials: {
+    color: '#052E16',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  memberMarkerLabelWrap: {
+    maxWidth: 150,
+    marginTop: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: t.overlay,
+    borderWidth: 1,
+    borderColor: '#22C55E66',
+  },
+  memberMarkerName: {
+    color: t.text,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  memberMarkerStatus: {
+    color: t.textDim,
+    fontSize: 8,
+    fontWeight: '700',
+    marginTop: 1,
+    textTransform: 'uppercase',
   },
 
   // Place popup
@@ -495,10 +897,10 @@ const styles = StyleSheet.create({
     bottom: 80,
     left: 12,
     right: 12,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     padding: 14,
   },
   popupHeader: {
@@ -515,10 +917,10 @@ const styles = StyleSheet.create({
   },
   popupIconText: { fontSize: 18, color: '#fff' },
   popupHeaderText: { flex: 1 },
-  popupTitle: { color: T.text, fontSize: 14, fontWeight: '600' },
-  popupAddress: { color: T.textSub, fontSize: 12, marginTop: 2 },
+  popupTitle: { color: t.text, fontSize: 14, fontWeight: '600' },
+  popupAddress: { color: t.textSub, fontSize: 12, marginTop: 2 },
   popupClose: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 22,
     paddingHorizontal: 4,
   },
@@ -529,20 +931,20 @@ const styles = StyleSheet.create({
   },
   popupPill: {
     flex: 1,
-    backgroundColor: T.surface,
+    backgroundColor: t.surface,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 10,
     alignItems: 'center',
   },
   popupPillValue: {
-    color: T.text,
+    color: t.text,
     fontSize: 13,
     fontWeight: '600',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   popupPillLabel: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 10,
     marginTop: 2,
   },
@@ -559,9 +961,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -596,10 +998,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 130 : 120,
     right: 12,
-    backgroundColor: 'rgba(8,14,28,0.95)',
+    backgroundColor: t.overlay,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     padding: 6,
     gap: 4,
   },
@@ -607,10 +1009,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: T.surface,
+    backgroundColor: t.surface,
   },
   simBtnText: {
-    color: T.text,
+    color: t.text,
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
@@ -628,11 +1030,11 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     borderWidth: 1.5,
-    borderColor: T.textSub,
+    borderColor: t.textSub,
   },
   crosshairLine: {
     position: 'absolute',
-    backgroundColor: T.textSub,
+    backgroundColor: t.textSub,
   },
   crosshairTop: { top: 0, width: 1.5, height: 4 },
   crosshairBottom: { bottom: 0, width: 1.5, height: 4 },

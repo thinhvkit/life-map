@@ -294,25 +294,41 @@ class PlaceDetectionService {
   }
 
   private extractBestName(data: any): string {
-    // Priority: POI name > namedetails > address components > road
-    if (data.namedetails?.name) return data.namedetails.name;
-    if (data.name && data.name !== data.address?.road) return data.name;
+    const addr = data.address ?? {};
+    const houseNumber: string | undefined = addr.house_number;
+    const road: string | undefined = addr.road;
 
-    const addr = data.address;
-    if (!addr) return 'Unknown Place';
+    const withNumber = (name: string): string => {
+      if (!houseNumber) return name;
+      if (name.startsWith(`${houseNumber} `) || name.includes(` ${houseNumber} `)) {
+        return name;
+      }
+      // If the name is (or contains) the road, prepend the house number
+      if (road && (name === road || name.includes(road))) {
+        return name === road ? `${houseNumber} ${road}` : `${houseNumber} ${name}`;
+      }
+      // POI name: append address fragment for disambiguation
+      return road ? `${name} (${houseNumber} ${road})` : `${name} (${houseNumber})`;
+    };
+
+    // Priority: POI name > namedetails > address components > road
+    if (data.namedetails?.name) return withNumber(data.namedetails.name);
+    if (data.name && data.name !== road) return withNumber(data.name);
+
+    if (!data.address) return 'Unknown Place';
 
     // POI-level names
-    if (addr.amenity) return addr.amenity;
-    if (addr.shop) return addr.shop;
-    if (addr.leisure) return addr.leisure;
-    if (addr.tourism) return addr.tourism;
-    if (addr.building && addr.building !== 'yes') return addr.building;
+    if (addr.amenity) return withNumber(addr.amenity);
+    if (addr.shop) return withNumber(addr.shop);
+    if (addr.leisure) return withNumber(addr.leisure);
+    if (addr.tourism) return withNumber(addr.tourism);
+    if (addr.building && addr.building !== 'yes') return withNumber(addr.building);
 
     // Fall back to house number + road
-    if (addr.house_number && addr.road) {
-      return `${addr.house_number} ${addr.road}`;
+    if (houseNumber && road) {
+      return `${houseNumber} ${road}`;
     }
-    if (addr.road) return addr.road;
+    if (road) return road;
 
     return data.display_name?.split(',')[0] || 'Unknown Place';
   }

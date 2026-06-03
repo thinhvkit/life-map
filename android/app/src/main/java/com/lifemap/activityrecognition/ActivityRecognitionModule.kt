@@ -1,4 +1,4 @@
-package com.lifemap.activityrecognition
+package com.tvo.lifemap.activityrecognition
 
 import android.Manifest
 import android.app.PendingIntent
@@ -20,7 +20,6 @@ import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.google.android.gms.location.DetectedActivity
 import android.util.Log
-import com.lifemap.BuildConfig
 import com.lifemap.codegen.NativeActivityRecognitionSpec
 
 class ActivityRecognitionModule(reactContext: ReactApplicationContext) :

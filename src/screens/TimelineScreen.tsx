@@ -11,10 +11,12 @@ import {
 import { format } from 'date-fns';
 import { useTrackingStore } from '../store/trackingStore';
 import { Segment } from '../models/types';
-import { T, ACTIVITY_COLORS, PLACE_COLORS } from '../utils/theme';
+import { T, Palette, ACTIVITY_COLORS, PLACE_COLORS } from '../utils/theme';
+import { useThemedStyles } from '../store/themeStore';
 import { formatDistance, formatDuration, formatTime } from '../utils/geo';
 
 export default function TimelineScreen() {
+  const styles = useThemedStyles(makeStyles);
   const todayLog = useTrackingStore(s => s.todayLog);
   const dateMode = useTrackingStore(s => s.dateMode);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -124,6 +126,7 @@ export default function TimelineScreen() {
 }
 
 function TimeBar({ segments }: { segments: Segment[] }) {
+  const styles = useThemedStyles(makeStyles);
   const total = 24 * 60;
   const toPos = (ts: number) => {
     const d = new Date(ts);
@@ -183,6 +186,7 @@ function SegmentCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
   const isTrip = seg.type === 'trip';
   const dur = seg.endTime - seg.startTime;
   const col = isTrip
@@ -308,6 +312,7 @@ function MetaPill({
   value: string;
   col: string;
 }) {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={[styles.pill, { borderColor: col + '22' }]}>
       <Text style={styles.pillValue}>{value}</Text>
@@ -317,6 +322,7 @@ function MetaPill({
 }
 
 function EndOfDayMarker() {
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.endOfDay}>
       <View style={styles.endOfDayLine} />
@@ -326,10 +332,11 @@ function EndOfDayMarker() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: T.bg,
+    backgroundColor: t.bg,
   },
 
   // Summary chips
@@ -338,28 +345,28 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: T.surface,
+    backgroundColor: t.surface,
     borderBottomWidth: 1,
-    borderBottomColor: T.border,
+    borderBottomColor: t.border,
   },
   summaryChip: {
     flex: 1,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     paddingVertical: 8,
     alignItems: 'center',
   },
   summaryValue: {
-    color: T.text,
+    color: t.text,
     fontSize: 14,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     letterSpacing: -0.3,
   },
   summaryLabel: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 9,
     marginTop: 2,
     textTransform: 'uppercase',
@@ -371,16 +378,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 8,
     paddingBottom: 6,
-    backgroundColor: T.surface,
+    backgroundColor: t.surface,
     borderBottomWidth: 1,
-    borderBottomColor: T.border,
+    borderBottomColor: t.border,
   },
   timeBarTrack: {
     position: 'relative',
     height: 18,
     borderRadius: 6,
     overflow: 'hidden',
-    backgroundColor: T.muted,
+    backgroundColor: t.muted,
   },
   timeBarSeg: {
     position: 'absolute',
@@ -401,7 +408,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   timeBarLabel: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 9,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
@@ -425,7 +432,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   timeText: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     lineHeight: 12,
@@ -437,7 +444,7 @@ const styles = StyleSheet.create({
     borderRadius: 1,
   },
   timeTextEnd: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 9,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     lineHeight: 11,
@@ -464,17 +471,17 @@ const styles = StyleSheet.create({
   },
   cardTitle: {},
   cardDuration: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   cardAddress: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 11,
     marginTop: 2,
   },
   cardTripInfo: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 11,
     marginTop: 1,
   },
@@ -484,7 +491,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: T.border,
+    borderTopColor: t.border,
   },
   pillRow: {
     flexDirection: 'row',
@@ -492,7 +499,7 @@ const styles = StyleSheet.create({
   },
   pill: {
     flex: 1,
-    backgroundColor: T.muted,
+    backgroundColor: t.muted,
     borderRadius: 8,
     paddingVertical: 5,
     paddingHorizontal: 6,
@@ -500,13 +507,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   pillValue: {
-    color: T.text,
+    color: t.text,
     fontSize: 11,
     fontWeight: '600',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   pillLabel: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 9,
     marginTop: 1,
   },
@@ -521,24 +528,24 @@ const styles = StyleSheet.create({
   endOfDayLine: {
     flex: 1,
     height: 1,
-    backgroundColor: T.border,
+    backgroundColor: t.border,
   },
   endOfDayText: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 11,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 
   // Section header (month/year mode)
   sectionHeader: {
-    backgroundColor: T.bg,
+    backgroundColor: t.bg,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: T.border,
+    borderBottomColor: t.border,
   },
   sectionHeaderText: {
-    color: T.accent,
+    color: t.accent,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -551,6 +558,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 80,
   },
-  emptyText: { color: T.text, fontSize: 18, fontWeight: '600' },
-  emptySubtext: { color: T.textDim, fontSize: 14, marginTop: 4 },
+  emptyText: { color: t.text, fontSize: 18, fontWeight: '600' },
+  emptySubtext: { color: t.textDim, fontSize: 14, marginTop: 4 },
 });

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   format,
+  startOfWeek,
+  endOfWeek,
   startOfMonth,
   endOfMonth,
   startOfYear,
@@ -17,7 +19,7 @@ import {
 import { simplifyRoute } from '../utils/routeSimplify';
 import { database } from '../services/database';
 
-export type DateMode = 'day' | 'month' | 'year';
+export type DateMode = 'day' | 'week' | 'month' | 'year';
 
 export interface LivePoint {
   latitude: number;
@@ -194,7 +196,10 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
       let startDate: string;
       let endDate: string;
 
-      if (mode === 'month') {
+      if (mode === 'week') {
+        startDate = format(startOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+        endDate = format(endOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      } else if (mode === 'month') {
         startDate = format(startOfMonth(d), 'yyyy-MM-dd');
         endDate = format(endOfMonth(d), 'yyyy-MM-dd');
       } else {

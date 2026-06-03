@@ -1,4 +1,4 @@
-package com.lifemap.activityrecognition
+package com.tvo.lifemap.activityrecognition
 
 import com.facebook.react.BaseReactPackage
 import com.facebook.react.bridge.NativeModule

@@ -8,7 +8,7 @@ import {
 } from '../models/types';
 
 const DB_NAME = 'lifemap.db';
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 class Database {
   private db: DB | null = null;
@@ -145,6 +145,36 @@ class Database {
       db.executeSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       console.log('[DB] Migrated to schema v2 (pending segment tables)');
     }
+
+    if (currentVersion < 3) {
+      db.executeSync(`
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        )
+      `);
+
+      db.executeSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      console.log('[DB] Migrated to schema v3 (settings table)');
+    }
+  }
+
+  // ── Settings (key-value) ──
+
+  getSetting(key: string): string | null {
+    const db = this.getDb();
+    const result = db.executeSync('SELECT value FROM settings WHERE key = ?', [
+      key,
+    ]);
+    return (result.rows[0]?.value as string) ?? null;
+  }
+
+  setSetting(key: string, value: string): void {
+    const db = this.getDb();
+    db.executeSync(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+      [key, value],
+    );
   }
 
   private getDb(): DB {

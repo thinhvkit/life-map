@@ -8,12 +8,14 @@ import {
 } from 'react-native';
 import { useTrackingStore } from '../store/trackingStore';
 import { ActivityType } from '../models/types';
-import { T, ACTIVITY_COLORS } from '../utils/theme';
+import { T, ACTIVITY_COLORS, Palette } from '../utils/theme';
+import { useThemedStyles } from '../store/themeStore';
 import { formatDistance, formatDuration } from '../utils/geo';
 import { format, parseISO } from 'date-fns';
 
 export default function StatsScreen() {
-  const { todayLog, isTracking, batteryLevel, dateMode, selectedDate } = useTrackingStore();
+  const styles = useThemedStyles(makeStyles);
+  const { todayLog, isTracking, dateMode, selectedDate } = useTrackingStore();
 
   const headerTitle = useMemo(() => {
     if (dateMode === 'year') return `${format(parseISO(selectedDate), 'yyyy')} Stats`;
@@ -89,10 +91,6 @@ export default function StatsScreen() {
               </Text>
             </View>
           )}
-        </View>
-        <View style={styles.batteryInfo}>
-          <Text style={styles.batteryLabel}>Battery used</Text>
-          <Text style={styles.batteryValue}>~4%</Text>
         </View>
       </View>
 
@@ -266,11 +264,13 @@ export default function StatsScreen() {
 }
 
 function SectionLabel({ children }: { children: string }) {
+  const styles = useThemedStyles(makeStyles);
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: T.bg },
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.bg },
   scrollContent: { paddingBottom: 100 },
 
   // Header
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   headerTitle: {
-    color: T.text,
+    color: t.text,
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: -0.5,
@@ -300,18 +300,9 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   statusText: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 12,
   },
-  batteryInfo: { alignItems: 'flex-end' },
-  batteryLabel: { color: T.textDim, fontSize: 10 },
-  batteryValue: {
-    color: '#16A34A',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-
   // Summary cards
   summaryRow: {
     flexDirection: 'row',
@@ -321,13 +312,13 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderRadius: 14,
     paddingVertical: 13,
     paddingHorizontal: 10,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
   },
   summaryValue: {
     fontSize: 20,
@@ -336,7 +327,7 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
   summaryLabel: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 10,
     marginTop: 4,
     textTransform: 'uppercase',
@@ -345,7 +336,7 @@ const styles = StyleSheet.create({
 
   // Section label
   sectionLabel: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -384,7 +375,7 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   activityName: {
-    color: T.text,
+    color: t.text,
     fontSize: 13,
     fontWeight: '500',
   },
@@ -393,12 +384,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   activityDuration: {
-    color: T.textSub,
+    color: t.textSub,
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   activityPct: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     width: 30,
@@ -406,7 +397,7 @@ const styles = StyleSheet.create({
   },
   barTrack: {
     height: 5,
-    backgroundColor: T.muted,
+    backgroundColor: t.muted,
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -418,13 +409,13 @@ const styles = StyleSheet.create({
   // Weekly sparkline
   weekCard: {
     marginHorizontal: 16,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderRadius: 14,
     paddingTop: 14,
     paddingHorizontal: 14,
     paddingBottom: 10,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     marginBottom: 20,
   },
   weekBars: {
@@ -463,10 +454,10 @@ const styles = StyleSheet.create({
   // Segment counts
   segmentCards: {
     marginHorizontal: 16,
-    backgroundColor: T.card,
+    backgroundColor: t.card,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: T.border,
+    borderColor: t.border,
     flexDirection: 'row',
     overflow: 'hidden',
   },
@@ -478,7 +469,7 @@ const styles = StyleSheet.create({
   },
   segmentCardBorder: {
     borderRightWidth: 1,
-    borderRightColor: T.border,
+    borderRightColor: t.border,
   },
   segmentValue: {
     fontSize: 24,
@@ -486,7 +477,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   segmentLabel: {
-    color: T.textDim,
+    color: t.textDim,
     fontSize: 11,
     marginTop: 3,
   },
@@ -498,6 +489,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 80,
   },
-  emptyText: { color: T.text, fontSize: 18, fontWeight: '600' },
-  emptySubtext: { color: T.textDim, fontSize: 14, marginTop: 4 },
+  emptyText: { color: t.text, fontSize: 18, fontWeight: '600' },
+  emptySubtext: { color: t.textDim, fontSize: 14, marginTop: 4 },
 });

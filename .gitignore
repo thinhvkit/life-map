@@ -66,6 +66,14 @@ yarn-error.log
 # Local config (contains tokens)
 src/config.local.ts
 
+# Firebase config (provide your own; not committed)
+android/app/google-services.json
+ios/GoogleService-Info.plist
+
+# Build / run logs
+ios-release.log
+ios-run.log
+
 # testing
 /coverage
 
